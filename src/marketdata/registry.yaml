@@ -1,0 +1,53 @@
+# marketdata symbol registry — internal symbol is the identity, vendor tickers are
+# attributes. Grouped by asset class purely for readability and for consumers
+# that want to slice a universe.
+#
+# Per-symbol keys (all optional except that SOME vendor mapping must resolve):
+#   yahoo         Yahoo ticker. null means Yahoo cannot serve it.
+#   norgate       Norgate symbol. null means Norgate cannot serve it. Left unset
+#                 (defaults to the internal name) so the seam is ready if a
+#                 Norgate US Stocks subscription lands. See ADR note in README.
+#   price_source  per-symbol override: yfinance | norgate
+#   inception     first date the instrument existed, for a sanity check on fetch
+#   note          free text
+#
+# SURVIVORSHIP: every symbol here is currently listed. yfinance cannot serve
+# delisted securities or point-in-time index membership, so this registry is NOT
+# a point-in-time universe and must never be treated as one. That fact is
+# recorded in the store (see manifest `universe_is_point_in_time`), not just here.
+
+Equity Index ETF:
+  SPY:
+    yahoo: "SPY"
+    inception: "1993-01-29"
+  VTI:
+    yahoo: "VTI"
+    inception: "2001-05-24"
+  QQQ:
+    yahoo: "QQQ"
+    inception: "1999-03-10"
+  IWM:
+    yahoo: "IWM"
+    inception: "2000-05-22"
+
+Treasury ETF:
+  TLT:
+    yahoo: "TLT"
+    inception: "2002-07-30"
+    note: "monthly distributions — total-return tier matters for any multi-week hold"
+  IEF:
+    yahoo: "IEF"
+    inception: "2002-07-26"
+  SHY:
+    yahoo: "SHY"
+    inception: "2002-07-22"
+
+Commodity ETF:
+  GLD:
+    yahoo: "GLD"
+    inception: "2004-11-18"
+
+Broad Bond ETF:
+  AGG:
+    yahoo: "AGG"
+    inception: "2003-09-22"

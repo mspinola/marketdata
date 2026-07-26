@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "marketdata"
+version = "0.1.0"
+description = "Equity/ETF daily bars — a producer/consumer split over a file store, with corporate-action adjustment derived on read."
+readme = "README.md"
+authors = [
+    {name = "Matt S.", email = "cotanalyzer@gmail.com"}
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=1.5",
+    "pyarrow>=10",
+    "PyYAML>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/mspinola/marketdata"
+Repository = "https://github.com/mspinola/marketdata"
+Issues = "https://github.com/mspinola/marketdata/issues"
+
+[project.optional-dependencies]
+# The free, cross-platform provider. Pinned to a floor because the meaning of
+# history(auto_adjust=...) has changed across yfinance versions — see
+# docs/design.md. Verified against 1.5.2.
+yahoo = ["yfinance>=1.5.2"]
+dev = ["pytest>=7", "ruff==0.15.22"]
+
+[project.scripts]
+marketdata-update = "marketdata.update:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+marketdata = ["*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["network: hits Yahoo — deselect with -m 'not network'"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]
