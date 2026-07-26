@@ -1,0 +1,40 @@
+# The vendor canary, deliberately NOT part of the PR gate.
+#
+# tests/test_pin.py reproduces Yahoo's own Adj Close from Close + Dividends. That
+# is what earns the right to drop the restated column from the store, and it is
+# the one test whose result depends on a third party rather than on this code.
+#
+# So it runs on a schedule, not on pull requests. A change in Yahoo's adjustment
+# convention is something to find out about within a week, but it is never a
+# reason to block an unrelated PR, and a free unofficial feed will occasionally
+# fail for reasons that have nothing to do with the repo.
+name: Vendor pin check
+
+on:
+  schedule:
+    # Mondays 08:00 UTC. Cadence matches how fast this could plausibly drift.
+    - cron: "0 8 * * 1"
+  workflow_dispatch:
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -e ".[yahoo,dev]"
+    - name: Reconstruct the vendor's adjusted column
+      env:
+        MARKETDATA_STORE: /tmp/marketdata_store
+      run: |
+        mkdir -p /tmp/marketdata_store
+        # Retry once. A single red run is usually Yahoo rate-limiting or a
+        # transient gap. The signal worth acting on is a PERSISTENT failure,
+        # which means the reconstruction in adjust.py no longer matches the
+        # vendor and docs/design.md needs re-verifying.
+        pytest tests/ -q -m network || (sleep 60 && pytest tests/ -q -m network)

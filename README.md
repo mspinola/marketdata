@@ -1,5 +1,9 @@
 # marketdata
 
+[![CI](https://github.com/mspinola/marketdata/actions/workflows/python-test.yml/badge.svg)](https://github.com/mspinola/marketdata/actions/workflows/python-test.yml)
+[![Vendor pin](https://github.com/mspinola/marketdata/actions/workflows/vendor-pin.yml/badge.svg)](https://github.com/mspinola/marketdata/actions/workflows/vendor-pin.yml)
+[![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-blue)](pyproject.toml)
+
 Equity and ETF daily bars: a producer/consumer split over a file-based store,
 with corporate-action adjustment **derived on read, never stored**.
 
@@ -92,6 +96,12 @@ share a `manifest.json`. Both producers do a read-modify-write on it.
 ```bash
 .venv/bin/python -m pytest tests/ -q
 ```
+
+CI runs the first form on every push and PR across Python 3.10 to 3.14. The network
+tests are **not** part of that gate. They run weekly in a separate `vendor-pin`
+workflow, because their result depends on a third party rather than on this code: a
+change in Yahoo's adjustment convention is worth hearing about within a week, but is
+never a reason to block an unrelated PR.
 
 `tests/test_pin.py` is the load-bearing one. It reconstructs Yahoo's own
 `Adj Close` from `Close + Dividends` across five symbols and asserts the match to
