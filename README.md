@@ -3,6 +3,7 @@
 [![CI](https://github.com/mspinola/marketdata/actions/workflows/python-test.yml/badge.svg)](https://github.com/mspinola/marketdata/actions/workflows/python-test.yml)
 [![Vendor pin](https://github.com/mspinola/marketdata/actions/workflows/vendor-pin.yml/badge.svg)](https://github.com/mspinola/marketdata/actions/workflows/vendor-pin.yml)
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-blue)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Equity and ETF daily bars: a producer/consumer split over a file-based store,
 with corporate-action adjustment **derived on read, never stored**.
