@@ -15,6 +15,21 @@ from pathlib import Path
 # by marketdata.adjust; no adjusted column is ever stored.
 SCHEMA_VERSION = 1
 
+#: Can this store's symbol universe be sliced AS IT STOOD on a past date?
+#:
+#: No, and it is not close. yfinance serves currently-listed securities only: it
+#: cannot return a delisted ticker at all, and it has no notion of index
+#: membership on a given date. So the universe is the survivors, and any study
+#: that RANKS or SELECTS across symbols (pick the top N, trade the spread between
+#: the best and worst) inherits a survivorship bias it cannot see. A study that
+#: trades each symbol on its own terms is unaffected, which is why this is a flag
+#: rather than a refusal.
+#:
+#: Stamped into the manifest so the fact travels with the DATA. A consumer who
+#: copies the store somewhere else, or reads it years later, gets the warning
+#: without having to find this file. Enforce with `store.require_point_in_time()`.
+UNIVERSE_IS_POINT_IN_TIME = False
+
 
 def store_root() -> Path:
     root = os.environ.get("MARKETDATA_STORE", "").strip()

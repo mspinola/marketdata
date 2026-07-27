@@ -14,7 +14,10 @@
 # SURVIVORSHIP: every symbol here is currently listed. yfinance cannot serve
 # delisted securities or point-in-time index membership, so this registry is NOT
 # a point-in-time universe and must never be treated as one. That fact is
-# recorded in the store (see manifest `universe_is_point_in_time`), not just here.
+# recorded in the store, not just here: the manifest carries
+# `universe_is_point_in_time`, and a study that ranks or selects ACROSS symbols
+# should assert `marketdata.store.require_point_in_time()` rather than remember.
+# Per-symbol studies are unaffected.
 
 Equity Index ETF:
   SPY:
