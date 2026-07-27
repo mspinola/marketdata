@@ -27,7 +27,24 @@ export MARKETDATA_STORE=~/code/marketdata_store
 marketdata-update --bars                    # every registry symbol
 marketdata-update --bars --symbols SPY TLT  # scoped
 marketdata-update --check                   # read-only summary, no network
+
+marketdata-update --pin snap.json           # capture the store's state
+marketdata-update --verify-pin snap.json    # prove it has not moved, exit 1 on drift
 ```
+
+### Pinning a store for a study
+
+A study that quotes numbers is only reproducible if the data behind them is
+identifiable, and `--bars` rewrites every symbol's `updated_at` while Yahoo restates
+adjusted history whenever a dividend lands. So the same command against the same path
+can produce different figures on different days.
+
+`--pin` captures row counts, date spans, source and `updated_at` per symbol.
+`--verify-pin` compares them and exits non-zero naming every field that moved. Commit
+the snapshot next to the study that depends on it.
+
+A snapshot is **evidence, not configuration**. If verification fails, the honest
+response is to say which figures are now unreproducible, not to re-pin and move on.
 
 ```python
 from marketdata import get_bars

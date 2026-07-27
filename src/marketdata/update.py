@@ -32,10 +32,45 @@ def main(argv=None) -> int:
                    help="scope the fetch to these internal symbols")
     p.add_argument("--check", action="store_true",
                    help="read-only store summary from the manifest (no network)")
+    p.add_argument("--pin", metavar="PATH",
+                   help="capture the store's current state to a snapshot JSON, so a "
+                        "study can prove later which data it used. Scope with "
+                        "--symbols. No network.")
+    p.add_argument("--verify-pin", metavar="PATH",
+                   help="check the store still matches a snapshot. Exit 1 on drift, "
+                        "naming every field that moved. No network.")
+    p.add_argument("--note", metavar="TEXT",
+                   help="with --pin: a line recorded in the snapshot saying what it is for")
     args = p.parse_args(argv)
 
-    if not (args.bars or args.check):
-        p.error("nothing to do — pass --bars or --check")
+    if not (args.bars or args.check or args.pin or args.verify_pin):
+        p.error("nothing to do — pass --bars, --check, --pin or --verify-pin")
+
+    if args.verify_pin:
+        from .pin import read_snapshot, verify_snapshot
+        snap = read_snapshot(args.verify_pin)
+        ok, problems = verify_snapshot(snap)
+        captured = snap.get("captured_at", "?")
+        if ok:
+            print(f"pin OK: the store still matches {args.verify_pin} "
+                  f"({len(snap.get('symbols', {}))} symbols, captured {captured})")
+            return 0
+        print(f"PIN DRIFTED from {args.verify_pin} (captured {captured}):")
+        for prob in problems:
+            print(f"  {prob}")
+        print("\nFigures quoted against this snapshot are no longer reproducible. Say "
+              "which ones, rather than re-pinning and moving on.")
+        return 1
+
+    if args.pin:
+        from .pin import build_snapshot, write_snapshot
+        snap = build_snapshot(args.symbols, note=args.note)
+        out = write_snapshot(snap, args.pin)
+        print(f"pinned {len(snap['symbols'])} symbols -> {out}")
+        for sym, e in sorted(snap["symbols"].items()):
+            print(f"  {sym:<6} {e['n_rows']:>6} rows  {e['first_date']}..{e['last_date']}"
+                  f"  {e['updated_at']}")
+        return 0
 
     if args.check:
         return _check()
