@@ -102,6 +102,11 @@ def test_build_refuses_to_pin_a_symbol_the_store_lacks(monkeypatch):
 
 
 def test_roundtrip(tmp_path, monkeypatch):
+    # `build_snapshot` records the store root, so this test needs one even though
+    # it patches away every read. Without it the test passes only where the
+    # AMBIENT env happens to set MARKETDATA_STORE, which CI does and a plain
+    # shell does not: a green run that proves the environment, not the code.
+    monkeypatch.setenv("MARKETDATA_STORE", str(tmp_path))
     monkeypatch.setattr(pin, "provenance", lambda s: _Prov())
     monkeypatch.setattr(pin.store, "load_manifest",
                         lambda: {"bars": {"equities/yfinance/SPY": {}}})

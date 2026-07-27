@@ -14,6 +14,11 @@ def _check() -> int:
         print(f"marketdata store at {config.store_root()}: empty (no bars written yet)")
         return 1
     print(f"marketdata store at {config.store_root()}  schema v{m.get('schema_version')}")
+    pit = store.is_point_in_time()
+    print("point-in-time universe: "
+          + {True: "yes",
+             False: "NO (survivors only, cross-sectional ranking is biased)",
+             None: "NOT RECORDED (run --stamp-flags)"}[pit])
     print(f"{'symbol':10s} {'rows':>7s}  {'first':10s} {'last':10s} "
           f"{'div':>5s} {'spl':>4s}  source")
     for name in sorted(bars):
@@ -41,10 +46,24 @@ def main(argv=None) -> int:
                         "naming every field that moved. No network.")
     p.add_argument("--note", metavar="TEXT",
                    help="with --pin: a line recorded in the snapshot saying what it is for")
+    p.add_argument("--stamp-flags", action="store_true",
+                   help="write the store-level flags (schema version, point-in-time) "
+                        "into the manifest without fetching anything. For a store "
+                        "written before a flag existed. No network, and it does not "
+                        "touch any symbol's updated_at, so pinned snapshots survive.")
     args = p.parse_args(argv)
 
-    if not (args.bars or args.check or args.pin or args.verify_pin):
-        p.error("nothing to do — pass --bars, --check, --pin or --verify-pin")
+    if not (args.bars or args.check or args.pin or args.verify_pin or args.stamp_flags):
+        p.error("nothing to do. Pass --bars, --check, --pin, --verify-pin "
+                "or --stamp-flags")
+
+    if args.stamp_flags:
+        m = store.stamp_flags()
+        print(f"stamped flags into {config.manifest_path()}: "
+              f"schema_version={m['schema_version']}, "
+              f"universe_is_point_in_time={m['universe_is_point_in_time']}")
+        if not args.check:
+            return 0
 
     if args.verify_pin:
         from .pin import read_snapshot, verify_snapshot

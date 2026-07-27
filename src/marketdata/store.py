@@ -96,8 +96,28 @@ def _touch_manifest(kind: str, name: str, df: pd.DataFrame, source: str) -> None
             key = "n_" + col.lower().replace(" ", "_")
             entry[key] = int((df[col].fillna(0) > 0).sum())
     m.setdefault(kind, {})[name] = entry
-    m["schema_version"] = config.SCHEMA_VERSION
+    _stamp_flags(m)
     _write_manifest(m)
+
+
+def _stamp_flags(m: dict) -> None:
+    """Store-level facts, refreshed on every write. Mutates `m` in place."""
+    m["schema_version"] = config.SCHEMA_VERSION
+    m["universe_is_point_in_time"] = config.UNIVERSE_IS_POINT_IN_TIME
+
+
+def stamp_flags() -> dict:
+    """Write the store-level flags without touching any bars.
+
+    Needed because a store written before a flag existed will never grow it
+    otherwise: the flags ride along with `_touch_manifest`, and re-fetching every
+    symbol just to record a constant would rewrite every `updated_at` and break
+    any pinned snapshot for no reason at all.
+    """
+    m = load_manifest()
+    _stamp_flags(m)
+    _write_manifest(m)
+    return m
 
 
 def schema_version() -> int:
@@ -111,3 +131,42 @@ def require_schema(minimum: int) -> None:
             f"marketdata store is schema v{v}, this consumer needs >= v{minimum}. "
             f"Re-run the producer (marketdata-update)."
         )
+
+
+def is_point_in_time():
+    """``True`` / ``False`` / ``None`` when the store never recorded it.
+
+    The three-way answer is the whole point. A store predating the flag has no
+    opinion, and collapsing that to ``False`` would be luck rather than knowledge:
+    it happens to be the right answer for today's yfinance-only stores and would
+    be the wrong one the moment a vendor with delisted coverage writes here. A
+    caller must be able to tell "we checked, and no" from "nobody ever said".
+    """
+    v = load_manifest().get("universe_is_point_in_time")
+    return v if isinstance(v, bool) else None
+
+
+def require_point_in_time() -> None:
+    """Refuse unless the store's universe is point-in-time.
+
+    For the studies that actually need it: anything that ranks or selects ACROSS
+    symbols. A flag sitting in a JSON file is passive, and a survivorship-inflated
+    cross-sectional result looks exactly like a good one, so give that study a
+    single line it can assert instead of a fact it has to remember.
+    """
+    v = is_point_in_time()
+    if v is True:
+        return
+    if v is None:
+        raise RuntimeError(
+            "marketdata store does not record whether its universe is "
+            "point-in-time, so it cannot be assumed to be. Run "
+            "`marketdata-update --stamp-flags` against it, then read the answer."
+        )
+    raise RuntimeError(
+        "marketdata store's universe is NOT point-in-time: it holds only "
+        "currently-listed symbols, because yfinance cannot serve delisted "
+        "securities or index membership as of a past date. Any result that ranks "
+        "or selects across symbols on this store carries survivorship bias. "
+        "Per-symbol studies are unaffected and need not call this."
+    )
