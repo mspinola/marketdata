@@ -54,3 +54,9 @@ Broad Bond ETF:
   AGG:
     yahoo: "AGG"
     inception: "2003-09-22"
+
+Volatility Index:
+  VIX:
+    yahoo: "^VIX"
+    inception: "1990-01-02"
+    note: "CBOE 30-day implied vol index. No corporate actions, so the split/raw tiers are a passthrough. It is an implied-vol series, not a tradable price."
