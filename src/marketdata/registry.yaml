@@ -60,3 +60,15 @@ Volatility Index:
     yahoo: "^VIX"
     inception: "1990-01-02"
     note: "CBOE 30-day implied vol index. No corporate actions, so the split/raw tiers are a passthrough. It is an implied-vol series, not a tradable price."
+  VXN:
+    yahoo: "^VXN"
+    inception: "2001-01-23"
+    note: "CBOE Nasdaq-100 implied vol. Implied series, not tradable. Realized counterpart: NQ."
+  OVX:
+    yahoo: "^OVX"
+    inception: "2007-05-10"
+    note: "CBOE crude-oil ETF (USO) implied vol. Implied series, not tradable. Realized counterpart: CL."
+  GVZ:
+    yahoo: "^GVZ"
+    inception: "2008-06-03"
+    note: "CBOE gold ETF (GLD) implied vol. Implied series, not tradable. Realized counterpart: GC."
