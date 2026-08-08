@@ -54,6 +54,36 @@ DOMAIN_TIERS = {
     "futures": ("backadj", "unadj", "propadj"),
 }
 
+# Which tiers are STORED (the vendor computed them and we cannot rebuild them)
+# against which are DERIVED on read. The split is the whole reason futures need a
+# tier in the store path and equities do not.
+#
+# Equities: one stored frame, ``None`` meaning "no tier component in the path".
+# Corporate actions arrive as dated events alongside the bars, so every tier is a
+# pure function of that single frame.
+#
+# Futures: TWO stored frames. Norgate's back-adjustment is roll splicing it
+# performed itself, and the stitched calendar spread at each roll is not present
+# in the unadjusted series, so `backadj` cannot be derived from `unadj` or the
+# other way round. `propadj` then IS derivable, but only from BOTH of them —
+# which is exactly why the futures producer must store both or neither.
+STORED_TIERS = {
+    "equities": (None,),
+    "futures": ("backadj", "unadj"),
+}
+DERIVED_TIERS = {
+    "equities": ("split", "raw", "total"),
+    "futures": ("propadj",),
+}
+
+
+def stored_tiers_for(domain: str) -> tuple:
+    """The tiers a producer must write for `domain`."""
+    if domain not in STORED_TIERS:
+        raise ValueError(
+            f"unknown domain {domain!r}; expected one of {tuple(STORED_TIERS)}")
+    return STORED_TIERS[domain]
+
 
 def tiers_for(domain: str) -> tuple:
     if domain not in DOMAIN_TIERS:
@@ -160,9 +190,19 @@ def to_total(df: pd.DataFrame, include_capital_gains: bool = False) -> pd.DataFr
 
 def adjust(df: pd.DataFrame, tier: str = "split", *,
            include_capital_gains: bool = False) -> pd.DataFrame:
-    """Derive one tier from a stored frame. See module docstring for the tiers."""
+    """Derive one EQUITY tier from the single stored frame. See module docstring.
+
+    Futures do not come through here: `backadj` and `unadj` are stored rather than
+    derived, and `propadj` needs both of them, so one frame in / one frame out
+    cannot express it. `bars.get_bars` dispatches on domain and calls
+    :func:`ratio_adjust` instead.
+    """
     if tier not in TIERS:
-        raise ValueError(f"tier must be one of {TIERS}, got {tier!r}")
+        other = next((d for d, ts in DOMAIN_TIERS.items()
+                      if tier in ts and d != "equities"), None)
+        hint = (f" — {tier!r} is a {other} tier; read it through bars.get_bars, "
+                f"which resolves the domain") if other else ""
+        raise ValueError(f"tier must be one of {TIERS}, got {tier!r}{hint}")
     if df.empty:
         return df
     if tier == "split":
@@ -170,6 +210,84 @@ def adjust(df: pd.DataFrame, tier: str = "split", *,
     if tier == "raw":
         return to_raw(df)
     return to_total(df, include_capital_gains=include_capital_gains)
+
+
+# ── Futures ───────────────────────────────────────────────────────────────
+def ratio_adjust(unadj: pd.DataFrame, backadj: pd.DataFrame) -> pd.DataFrame:
+    """Proportional (ratio) back-adjustment, derived from the two stored futures
+    frames. Empty if either input is empty.
+
+    WHY. Norgate publishes only ADDITIVE back-adjustment (the ``_CCB``
+    continuous). Additive accumulation of roll gaps drives a long-history,
+    low-priced contract's history below zero — measured on the cotdata store,
+    52.3% of ZS's back-adjusted closes and 41.2% of DC's (Class III Milk) are
+    non-positive. A close-based stop, an R-multiple or a percent return is
+    meaningless on a non-positive series, so those markets have no usable
+    `backadj` at all. Ratio adjustment preserves percentage returns instead.
+
+    It does NOT make the series strictly positive. Ratio adjustment scales each
+    segment by a POSITIVE factor, so it preserves the sign of the unadjusted
+    series rather than imposing one: WTI settled at −37.63 on 2020-04-20 and CL's
+    `propadj` close that day is −24.11. That is one bar in the whole store —
+    across 47 symbols `propadj` has exactly one non-positive close, 0.009% of
+    crude's 10,882 bars. So this delivers three orders of magnitude fewer
+    non-positive closes, not none, and a consumer computing returns still has to
+    handle that one day rather than assume it away.
+
+    METHOD. The additive series ``B`` and the unadjusted series ``U`` differ by an
+    offset ``O = B − U`` that is piecewise-constant and steps only at rolls (each
+    step is Norgate's stitched calendar spread). At roll ``r`` the recovered
+    spread, measured on the last day the OLD contract is front, is
+    ``s = O[r−1] − O[r]``; the roll ratio is ``k = (U[r−1] + s) / U[r−1]``. Each
+    historical segment is scaled by the cumulative product of ``k`` for all rolls
+    at or after it, anchoring the most recent segment to 1 so the series ends at
+    actual prices. O/H/L/C are scaled; every other column passes through from the
+    unadjusted frame unchanged.
+    """
+    if unadj.empty or backadj.empty or "Close" not in unadj or "Close" not in backadj:
+        return pd.DataFrame()
+
+    U = unadj.copy()
+    B = backadj.copy()
+    U.index = pd.to_datetime(U.index).tz_localize(None).normalize()
+    B.index = pd.to_datetime(B.index).tz_localize(None).normalize()
+    U = U.sort_index()
+    idx = U.index.intersection(B.index.sort_values())
+    if len(idx) == 0:
+        return pd.DataFrame()
+    U = U.loc[idx]
+    b_close = B["Close"].reindex(idx)
+
+    # Roll boundaries: prefer the semantic Delivery-Month change, fall back to
+    # material steps in the offset when the producer did not carry the column.
+    offset = b_close - U["Close"]
+    if "Delivery Month" in U.columns:
+        dm = U["Delivery Month"]
+        roll = dm.ne(dm.shift()) & dm.shift().notna()
+    else:
+        roll = offset.diff().abs() > 1e-4
+        roll.iloc[0] = False
+
+    seg = roll.cumsum()                          # segment id, increments at each roll
+    spread = (-offset.diff()).where(roll, 0.0)   # F_new(r−1) − F_old(r−1)
+    u_prev = U["Close"].shift(1)
+    ratio = pd.Series(1.0, index=idx)
+    ok = roll & (u_prev > 0)
+    ratio[ok] = (u_prev[ok] + spread[ok]) / u_prev[ok]
+
+    # Per-segment cumulative factor, anchored so the most recent segment = 1.
+    roll_ratios = ratio[roll].to_numpy()
+    n_seg = int(seg.iloc[-1])
+    factors = np.ones(n_seg + 1)
+    for s in range(n_seg - 1, -1, -1):
+        factors[s] = factors[s + 1] * roll_ratios[s]
+    factor = pd.Series(factors[seg.to_numpy()], index=idx)
+
+    out = U.copy()
+    for c in OHLC:
+        if c in out.columns:
+            out[c] = out[c] * factor
+    return out
 
 
 # Symbols the pin test reconstructs against the vendor's own adjusted column.

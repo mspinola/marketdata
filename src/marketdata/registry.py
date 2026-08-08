@@ -42,8 +42,26 @@ class Symbol:
 
 # Asset class -> domain, so the YAML does not repeat `domain:` on every symbol.
 # A per-symbol `domain:` still wins.
+#
+# The futures sector names are cotdata's, so a reader moving between the two
+# registries meets the same vocabulary — with one deliberate exception. cotdata
+# files the index futures under "Equities", which here would sit next to genuine
+# equity ETFs in the other domain and read as a contradiction, so it is spelled
+# "Equity Index Futures". Nothing consumes the class string across the seam:
+# crowdmon reads bars, the manifest and contract specs, and every COT-side
+# asset-class read still comes from cotdata's own registry.
 _CLASS_DOMAIN = {
     "Futures": "futures",
+    "Equity Index Futures": "futures",
+    "Metals": "futures",
+    "Energies": "futures",
+    "Grains": "futures",
+    "Dairy": "futures",
+    "Currencies": "futures",
+    "Fixed Income": "futures",
+    "Softs": "futures",
+    "Live Stock": "futures",
+    "Crypto": "futures",
 }
 
 

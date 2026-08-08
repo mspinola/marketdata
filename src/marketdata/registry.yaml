@@ -72,3 +72,91 @@ Volatility Index:
     yahoo: "^GVZ"
     inception: "2008-06-03"
     note: "CBOE gold ETF (GLD) implied vol. Implied series, not tradable. Realized counterpart: GC."
+
+# ── Futures ───────────────────────────────────────────────────────────────
+# Ported from cotdata's registry (ADR-0007 step 2: bars move here, CFTC
+# positioning stays there). Internal symbols and sector names are cotdata's, so
+# the two registries stay readable side by side and a repointed consumer keeps
+# passing the same symbol strings.
+#
+# `norgate` is explicit on every row because this registry defaults an unset
+# vendor mapping to the internal name, and Norgate's continuous symbols carry a
+# leading '&' ("&ES", not "ES"). `yahoo: null` is equally deliberate: Yahoo's
+# continuous-futures tickers (SB=F and friends) exist in cotdata only as the
+# fallback for a databento deployment, which ADR-0007 scopes out of this
+# provider. Leaving them unset would silently default to the internal symbol and
+# resolve futures reads to an equity ticker of the same name.
+#
+# NOT ported: MME and MFS (MSCI EM / EAFE). Norgate carries no continuous series
+# for either, so cotdata prices them off the EEM and EFA ETF proxies through
+# yfinance. That needs a futures-domain path in the yfinance provider, which is
+# a separate piece of work from the Norgate producer this registry serves.
+
+Equity Index Futures:
+  ES:  {norgate: "&ES",  yahoo: null}
+  NQ:  {norgate: "&NQ",  yahoo: null}
+  YM:  {norgate: "&YM",  yahoo: null}
+  RTY: {norgate: "&RTY", yahoo: null}
+  EMD: {norgate: "&EMD", yahoo: null, note: "E-mini S&P MidCap 400 (CME)"}
+  NKD: {norgate: "&NKD", yahoo: null, note: "Nikkei 225, $-denominated (CME)"}
+
+Metals:
+  GC: {norgate: "&GC", yahoo: null}
+  SI: {norgate: "&SI", yahoo: null}
+  HG: {norgate: "&HG", yahoo: null}
+  PL: {norgate: "&PL", yahoo: null}
+  PA: {norgate: "&PA", yahoo: null}
+
+Energies:
+  CL:  {norgate: "&CL",  yahoo: null}
+  RB:  {norgate: "&RB",  yahoo: null}
+  HO:  {norgate: "&HO",  yahoo: null}
+  NG:  {norgate: "&NG",  yahoo: null}
+  WBS: {norgate: "&WBS", yahoo: null, note: "WTI Crude Oil (ICE Futures Europe). Not a duplicate of CL — different holder base."}
+
+Grains:
+  ZC: {norgate: "&ZC", yahoo: null}
+  ZS: {norgate: "&ZS", yahoo: null, note: "52.3% of backadj closes are non-positive — propadj is the only usable return series"}
+  ZM: {norgate: "&ZM", yahoo: null}
+  ZL: {norgate: "&ZL", yahoo: null}
+  ZW: {norgate: "&ZW", yahoo: null}
+  ZR: {norgate: "&ZR", yahoo: null, note: "Rough Rice (CBOT)"}
+  ZO: {norgate: "&ZO", yahoo: null, note: "Oats (CBOT)"}
+  KE: {norgate: "&KE", yahoo: null, note: "KC HRW Wheat (CME)"}
+
+Dairy:
+  DC: {norgate: "&DC", yahoo: null, note: "Class III Milk (CME). 41.2% of backadj closes are non-positive — propadj required."}
+
+Currencies:
+  6E: {norgate: "&6E", yahoo: null}
+  6A: {norgate: "&6A", yahoo: null}
+  6B: {norgate: "&6B", yahoo: null}
+  6C: {norgate: "&6C", yahoo: null}
+  6J: {norgate: "&6J", yahoo: null}
+  6S: {norgate: "&6S", yahoo: null}
+  6M: {norgate: "&6M", yahoo: null}
+  6N: {norgate: "&6N", yahoo: null}
+  DX: {norgate: "&DX", yahoo: null, note: "US Dollar Index (ICE)"}
+
+Fixed Income:
+  ZN: {norgate: "&ZN", yahoo: null}
+  ZT: {norgate: "&ZT", yahoo: null}
+  ZF: {norgate: "&ZF", yahoo: null}
+  ZB: {norgate: "&ZB", yahoo: null}
+
+Softs:
+  SB:  {norgate: "&SB",  yahoo: null}
+  CT:  {norgate: "&CT",  yahoo: null}
+  CC:  {norgate: "&CC",  yahoo: null}
+  KC:  {norgate: "&KC",  yahoo: null}
+  OJ:  {norgate: "&OJ",  yahoo: null}
+  LBR: {norgate: "&LBR", yahoo: null, note: "CME Lumber (physical), listed 2022-08"}
+
+Live Stock:
+  LE: {norgate: "&LE", yahoo: null}
+  HE: {norgate: "&HE", yahoo: null}
+  GF: {norgate: "&GF", yahoo: null}
+
+Crypto:
+  BTC: {norgate: "&BTC", yahoo: null}
+  ETH: {norgate: "&ETH", yahoo: null}

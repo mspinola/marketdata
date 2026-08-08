@@ -5,14 +5,17 @@
 [![Python](https://img.shields.io/badge/python-3.10%E2%80%933.14-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Equity and ETF daily bars: a producer/consumer split over a file-based store,
-with corporate-action adjustment **derived on read, never stored**.
+Daily bars — equities, ETFs and futures — as a producer/consumer split over a
+file-based store, with adjustment **derived on read wherever it can be**.
 
 Sibling of [cotdata](https://github.com/mspinola/cotdata) and built on the same
 design ideas, but deliberately a separate package. cotdata's registry requires a
 `cftc_code` and equities have no COT report. See
 [docs/design.md](docs/design.md) for the full reasoning and for everything about
-yfinance's behaviour that was verified rather than assumed.
+each vendor's behaviour that was verified rather than assumed.
+
+Futures arrived with ADR-0007, which makes cotdata CFTC positioning only and
+moves every bar here.
 
 ## Install
 
@@ -24,8 +27,10 @@ uv venv --python 3.11 && uv pip install -e ".[yahoo,dev]" "setuptools<81"
 
 ```bash
 export MARKETDATA_STORE=~/code/marketdata_store
-marketdata-update --bars                    # every registry symbol
+marketdata-update --bars                    # every registry symbol this box can produce
 marketdata-update --bars --symbols SPY TLT  # scoped
+marketdata-update --bars --domain equities  # skip futures (no Norgate on this box)
+marketdata-update --metadata                # futures contract specs (Windows + Norgate)
 marketdata-update --check                   # read-only summary, no network
 
 marketdata-update --pin snap.json           # capture the store's state
@@ -52,13 +57,30 @@ from marketdata import get_bars
 px = get_bars("TLT", "total", start="2010-01-01")
 ```
 
-## The three adjustment tiers
+## Two domains, two adjustment axes
 
-The store holds one frame per symbol exactly as the vendor serves it, plus the
-dated action columns. Yahoo's `Adj Close` is **not** stored: it is restated every
-time a new dividend lands, so a backtest pinned to it is not reproducible. Raw
-bars plus dated actions are immutable facts, and `marketdata.adjust` rebuilds any
-tier from them deterministically.
+The domain a symbol belongs to decides which tiers it has, and `get_bars`
+resolves it from the registry rather than taking it as an argument. Asking for a
+futures tier on an equity — or the reverse — raises a message naming the right
+ones.
+
+| Domain | Tiers | Stored | Derived on read |
+|---|---|---|---|
+| `equities` | `split`, `raw`, `total` | one frame | all three |
+| `futures` | `backadj`, `unadj`, `propadj` | **both** `backadj` and `unadj` | `propadj` |
+
+Equities derive everything because corporate actions arrive as dated events
+alongside the bars. Futures cannot: Norgate's back-adjustment is roll splicing it
+performed itself, and the stitched calendar spread at each roll appears in no
+other series, so `backadj` and `unadj` are two separate stored facts.
+
+## The three equity adjustment tiers
+
+The store holds one frame per equity symbol exactly as the vendor serves it, plus
+the dated action columns. Yahoo's `Adj Close` is **not** stored: it is restated
+every time a new dividend lands, so a backtest pinned to it is not reproducible.
+Raw bars plus dated actions are immutable facts, and `marketdata.adjust` rebuilds
+any tier from them deterministically.
 
 | Tier | Splits | Dividends | Use |
 |---|---|---|---|
@@ -69,11 +91,35 @@ tier from them deterministically.
 This is not a cosmetic distinction. TLT over its full history returns **+2.1%** on
 the price series and **+132.3%** on total return.
 
+## The three futures adjustment tiers
+
+| Tier | What it is | Use |
+|---|---|---|
+| `backadj` (default) | additive back-adjustment, as Norgate computes it | signals and stops. Preserves absolute daily price *changes* |
+| `unadj` | raw front-month, real spread gaps at each roll | absolute price level, point-value sizing |
+| `propadj` | ratio back-adjustment, derived from the two above | volatility and any percent return |
+
+`propadj` is not an optional refinement. Additive adjustment accumulates roll
+gaps downward, and across the cotdata store **52.3% of ZS's back-adjusted closes
+and 41.2% of DC's are non-positive** — a percent return or an R-multiple is
+meaningless on those. Ratio adjustment preserves percentage returns. It does not
+make the series strictly positive: it scales by a positive factor, so it keeps
+the underlying's sign, and CL prints −24.11 on 2020-04-20 because WTI really
+settled at −37.63. That is one bar out of the whole store.
+
+Because `propadj` needs both stored tiers, **the futures producer writes both or
+neither**, and a read that finds only one raises instead of returning empty. A
+half-stored symbol is worth being loud about: additive back-adjusted percent
+volatility comes out ~200x too high for soybeans and 0.47x for gold, and 0.47x
+passes every implausibility screen a spot check would apply.
+
 ## Store layout
 
 ```
 $MARKETDATA_STORE/
-  bars/<domain>/<source>/<symbol>.parquet
+  bars/<domain>/<source>/<symbol>.parquet          # equities — one stored frame
+  bars/<domain>/<source>/<symbol>_<tier>.parquet   # futures  — one per stored tier
+  metadata/contract_specs.parquet                  # futures point value, tick size, margin
   manifest.json
 ```
 
@@ -99,7 +145,7 @@ silently substituting a vendor is what ADR-0006 forbids.
 |---|---|
 | `MARKETDATA_STORE` | the store root. Required. Reads and writes both guard on it |
 | `MARKETDATA_REGISTRY` | override the packaged `registry.yaml` |
-| `MARKETDATA_PRICE_SOURCE` | deployment default vendor, `yfinance` if unset |
+| `MARKETDATA_PRICE_SOURCE` | deployment default vendor, `yfinance` if unset. Futures ignore it — only Norgate serves them |
 | `MARKETDATA_NO_NETWORK` | skip the network tests |
 
 The store root may share a parent folder with cotdata's, but the two must not

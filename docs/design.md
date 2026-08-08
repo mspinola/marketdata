@@ -104,6 +104,81 @@ total return  (total tier):  +132.3%
 Any study holding a bond ETF across an ex-date on the price series is measuring
 the wrong thing by two orders of magnitude.
 
+## Futures: why the store grew a tier component
+
+`adjust.DOMAIN_TIERS` declared the futures tiers before a provider existed, so
+the error messages would be right from the first day. What it could not declare
+was that the futures axis does not fit the store's one-frame-per-symbol shape,
+and that turned out to be the substance of the work rather than a detail of it.
+
+The equity design rests on a property that does not generalise: **corporate
+actions are dated events the vendor hands over with the bars.** One stored frame
+plus a `Dividends` and a `Stock Splits` column is enough to reconstruct any tier,
+which is why nothing adjusted is ever stored here.
+
+Norgate's back-adjustment is not that. It is roll splicing the vendor performed,
+and the stitched calendar spread at each roll is present in no other series it
+publishes. `backadj` cannot be derived from `unadj`, or the reverse. So futures
+store two frames, and the store path grew a tier component
+(`<symbol>_<tier>.parquet`) to hold them. Equities keep the flat
+`<symbol>.parquet` of schema v1 and read through exactly the same code path, so
+an existing store is not migrated, only extended.
+
+Verified before writing any of it: on a v1 store, `get_bars("ES", "backadj")`
+raised `tier must be one of ('split', 'raw', 'total')`. `check_tier` accepted the
+tier for the futures domain and `adjust()` then rejected it, so every futures
+read failed no matter what a provider had written. The declared domain was a
+promise about error messages, not a working path.
+
+### propadj, and why both tiers are a hard requirement
+
+`propadj` — ratio back-adjustment — IS derivable, but only from both stored
+frames. It is also the only futures series whose percent returns are correct, so
+it is what a volatility or position-sizing consumer must read.
+
+Measured on the cotdata store, which has produced these series for years:
+
+| Series | Non-positive closes |
+|---|---|
+| `backadj` ZS (soybeans) | 52.3% |
+| `backadj` DC (Class III Milk) | 41.2% |
+| `propadj`, all 47 symbols | 1 bar (CL, 2020-04-20) |
+
+Additive adjustment accumulates roll gaps downward until a long-history,
+low-priced contract's back-history crosses zero, and a percent return or an
+R-multiple is meaningless there. Ratio adjustment fixes it — but it does **not**
+make the series strictly positive, which an earlier cotdata docstring claimed and
+a downstream volatility module believed. It scales by a positive factor, so it
+preserves the underlying's sign: CL closes at −24.11 on 2020-04-20 because WTI
+settled at −37.63 that day. One bar in the whole store, and a consumer computing
+returns still has to handle it.
+
+So a symbol with one stored tier cannot serve `propadj` at all. The producer
+writes both or fails the symbol with nothing on disk, and a read that finds one
+raises rather than returning empty. Loudness is the point: additive
+back-adjusted percent volatility is ~200x too high for soybeans and **0.47x for
+gold**, and 0.47x is a plausible-looking number that never goes negative and
+passes every implausibility screen a spot check would apply.
+
+### Only Windows can produce this half
+
+`norgatedata` talks to a locally installed Norgate Data Updater rather than an
+API, and NDU is Windows-only. There is no macOS or Linux path at any Python
+version. Since Norgate is also the only vendor supplying the full tier set, the
+other machines cannot produce a futures store that a percent-return consumer can
+use — they read a **synced** one. That is the answer, not a temporary state:
+`marketdata-update --bars` skips the futures half with a message rather than
+failing, and `--domain futures` on such a box explains why instead of raising
+`ModuleNotFoundError`.
+
+### What is NOT ported
+
+`MME` and `MFS` (MSCI EM and EAFE). Norgate carries no continuous series for
+either, and cotdata prices them off the EEM and EFA ETF proxies through yfinance.
+Serving them here needs a futures-domain path in the yfinance provider, which is
+separate work from the Norgate producer. They are absent from the futures
+registry rather than present and unserviceable.
+
 ## Vendor is a path component
 
 `bars/<domain>/<source>/<symbol>.parquet`, not `bars/<symbol>.parquet`.
