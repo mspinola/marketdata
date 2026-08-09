@@ -21,7 +21,14 @@ from .adjust import (
     tiers_for,
 )
 from .bars import available, get_bars
-from .provenance import Provenance, provenance
+from .provenance import (
+    CoverageError,
+    Gap,
+    Provenance,
+    coverage_gaps,
+    provenance,
+    require_coverage,
+)
 from .registry import (
     DOMAINS,
     REGISTRY,
@@ -41,6 +48,7 @@ __version__ = "0.1.0"
 __all__ = [
     "get_bars", "available",
     "provenance", "Provenance",
+    "coverage_gaps", "require_coverage", "Gap", "CoverageError",
     "adjust", "ratio_adjust", "TIERS", "DOMAIN_TIERS", "STORED_TIERS",
     "tiers_for", "stored_tiers_for", "ADJUSTMENT_VERSION",
     "symbol", "all_symbols", "by_asset_class", "domain_for", "DOMAINS",
