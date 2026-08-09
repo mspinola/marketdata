@@ -33,28 +33,70 @@ def _atomic_write_parquet(df: pd.DataFrame, path: Path) -> None:
             os.remove(tmp)
 
 
-def write_bars(symbol: str, df: pd.DataFrame, domain: str, source: str) -> None:
-    _atomic_write_parquet(df, config.bars_dir(domain, source) / f"{symbol}.parquet")
-    _touch_manifest("bars", f"{domain}/{source}/{symbol}", df, source)
+def _entry_name(symbol: str, domain: str, source: str, tier) -> str:
+    """Manifest key for one stored series. Mirrors the path so a manifest entry and
+    the file it describes can be matched by eye."""
+    return f"{domain}/{source}/{symbol}" + (f"_{tier}" if tier else "")
 
 
-def read_bars(symbol: str, domain: str, source: str) -> pd.DataFrame:
-    p = config.bars_dir(domain, source) / f"{symbol}.parquet"
+def write_bars(symbol: str, df: pd.DataFrame, domain: str, source: str,
+               tier: str | None = None) -> None:
+    _atomic_write_parquet(df, config.bars_path(symbol, domain, source, tier))
+    _touch_manifest("bars", _entry_name(symbol, domain, source, tier), df, source)
+
+
+def read_bars(symbol: str, domain: str, source: str,
+              tier: str | None = None) -> pd.DataFrame:
+    p = config.bars_path(symbol, domain, source, tier)
     return pd.read_parquet(p) if p.exists() else pd.DataFrame()
 
 
-def has_bars(symbol: str, domain: str, source: str) -> bool:
-    return (config.bars_dir(domain, source) / f"{symbol}.parquet").exists()
+def has_bars(symbol: str, domain: str, source: str,
+             tier: str | None = None) -> bool:
+    return config.bars_path(symbol, domain, source, tier).exists()
 
 
-def sources_for(symbol: str, domain: str) -> list:
+def sources_for(symbol: str, domain: str, tier: str | None = None) -> list:
     """Every vendor holding a series for `symbol` in `domain`, sorted. Used to
-    turn a missing-file read into a message naming what IS present."""
+    turn a missing-file read into a message naming what IS present.
+
+    `tier` scopes the question to one stored series. Pass it for a domain that
+    stores several (futures), so "missing" is answered about the tier actually
+    asked for rather than about the symbol in general.
+    """
     root = config.store_root() / "bars" / domain
     if not root.exists():
         return []
+    name = f"{symbol}_{tier}" if tier else symbol
     return sorted(d.name for d in root.iterdir()
-                  if d.is_dir() and (d / f"{symbol}.parquet").exists())
+                  if d.is_dir() and (d / f"{name}.parquet").exists())
+
+
+# ── Contract specifications ───────────────────────────────────────────────
+# Unlike bars (one parquet per symbol per stored tier), specs live in ONE table
+# keyed by Symbol. So a SCOPED refresh must upsert: a plain write would replace
+# the whole table and silently drop every market that was not in the request.
+def write_metadata(df: pd.DataFrame, source: str) -> None:
+    """Replace the whole contract_specs table. For a full regeneration only."""
+    _atomic_write_parquet(df, config.metadata_dir() / "contract_specs.parquet")
+    _touch_manifest("metadata", "contract_specs", df, source)
+
+
+def upsert_metadata(df: pd.DataFrame, source: str) -> None:
+    """Merge `df` into contract_specs by ``Symbol``: rows for symbols in `df` are
+    replaced or added, rows for symbols absent from `df` are kept."""
+    existing = read_metadata()
+    if not existing.empty and "Symbol" in existing.columns:
+        keep = existing[~existing["Symbol"].isin(df["Symbol"])]
+        merged = pd.concat([keep, df], ignore_index=True)
+    else:
+        merged = df
+    write_metadata(merged.sort_values("Symbol").reset_index(drop=True), source=source)
+
+
+def read_metadata() -> pd.DataFrame:
+    p = config.metadata_dir() / "contract_specs.parquet"
+    return pd.read_parquet(p) if p.exists() else pd.DataFrame()
 
 
 # ── Manifest ──────────────────────────────────────────────────────────────

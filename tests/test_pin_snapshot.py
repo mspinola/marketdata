@@ -33,10 +33,11 @@ class _Prov:
         self.source = kw.get("source", "yfinance")
         self.updated_at = kw.get("updated_at", "2026-01-01T00:00:00Z")
         self.domain = kw.get("domain", "equities")
+        self.tier = kw.get("tier")
 
 
 def test_unchanged_store_verifies(monkeypatch):
-    monkeypatch.setattr(pin, "provenance", lambda s: _Prov())
+    monkeypatch.setattr(pin, "provenance", lambda s, tier=None: _Prov())
     ok, problems = pin.verify_snapshot(_snap())
     assert ok and problems == []
 
@@ -50,7 +51,7 @@ def test_unchanged_store_verifies(monkeypatch):
 ])
 def test_every_pinned_field_is_actually_compared(monkeypatch, field, changed):
     """A field in PINNED_FIELDS that nothing compares is decoration."""
-    monkeypatch.setattr(pin, "provenance", lambda s: _Prov(**{field: changed}))
+    monkeypatch.setattr(pin, "provenance", lambda s, tier=None: _Prov(**{field: changed}))
     ok, problems = pin.verify_snapshot(_snap())
     assert not ok
     assert any(field in p for p in problems), problems
@@ -60,7 +61,7 @@ def test_updated_at_catches_a_refetch_that_returned_identical_data(monkeypatch):
     """The strictest field, and the reason it is pinned: the bytes may match, but
     the run that produced them is not the run the study cited."""
     monkeypatch.setattr(pin, "provenance",
-                        lambda s: _Prov(updated_at="2026-09-09T09:09:09Z"))
+                        lambda s, tier=None: _Prov(updated_at="2026-09-09T09:09:09Z"))
     ok, problems = pin.verify_snapshot(_snap())
     assert not ok and "updated_at" in problems[0]
 
@@ -84,7 +85,7 @@ def test_empty_snapshot_does_not_pass_vacuously():
 def test_an_older_snapshot_missing_a_field_is_tolerated(monkeypatch):
     """Forward compatibility: a snapshot that predates a pinned field must not fail
     on it. Only fields the snapshot actually recorded are compared."""
-    monkeypatch.setattr(pin, "provenance", lambda s: _Prov())
+    monkeypatch.setattr(pin, "provenance", lambda s, tier=None: _Prov())
     snap = _snap()
     del snap["symbols"]["SPY"]["source"]
     ok, _ = pin.verify_snapshot(snap)
@@ -107,7 +108,7 @@ def test_roundtrip(tmp_path, monkeypatch):
     # AMBIENT env happens to set MARKETDATA_STORE, which CI does and a plain
     # shell does not: a green run that proves the environment, not the code.
     monkeypatch.setenv("MARKETDATA_STORE", str(tmp_path))
-    monkeypatch.setattr(pin, "provenance", lambda s: _Prov())
+    monkeypatch.setattr(pin, "provenance", lambda s, tier=None: _Prov())
     monkeypatch.setattr(pin.store, "load_manifest",
                         lambda: {"bars": {"equities/yfinance/SPY": {}}})
     p = pin.write_snapshot(pin.build_snapshot(["SPY"], note="a study"), tmp_path / "s.json")

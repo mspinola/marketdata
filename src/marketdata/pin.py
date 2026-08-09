@@ -30,30 +30,66 @@ from typing import Dict, Iterable, List, Optional, Tuple
 from . import store
 from .provenance import provenance
 
-SNAPSHOT_VERSION = 1
+# v2 — an entry is one STORED SERIES rather than one symbol, so a futures symbol
+#      pins as `ES_backadj` AND `ES_unadj`. Pinning one of them would leave
+#      `propadj` — derived from both — half covered, and a study quoting a
+#      volatility figure would verify green against a store that had moved under
+#      it. A v1 snapshot still verifies unchanged: its keys are plain symbols and
+#      an absent `tier` field reads as "the domain's default stored series".
+SNAPSHOT_VERSION = 2
 #: The fields a snapshot compares. `updated_at` is the strictest and the one that
 #: catches a re-fetch that happened to return identical data: the bytes may match,
 #: but the run that produced them is not the run the study cited.
 PINNED_FIELDS = ("n_rows", "first_date", "last_date", "source", "updated_at")
 
 
+def _symbol_of(manifest_name: str) -> str:
+    """``'futures/norgate/ES_backadj'`` -> ``'ES'``."""
+    from .adjust import STORED_TIERS, stored_tiers_for
+
+    parts = manifest_name.split("/")
+    dom, leaf = (parts[0], parts[-1]) if len(parts) > 1 else ("", parts[-1])
+    for tier in (stored_tiers_for(dom) if dom in STORED_TIERS else ()):
+        if tier and leaf.endswith(f"_{tier}"):
+            return leaf[: -len(tier) - 1]
+    return leaf
+
+
+def _stored_series(symbols: Optional[Iterable[str]]) -> List[tuple]:
+    """``(entry_key, symbol, tier)`` for every stored series to pin.
+
+    A caller naming symbols means the SYMBOL, so ``--symbols ES`` pins both of
+    ES's tiers instead of requiring the caller to know the store's file naming.
+    """
+    from .adjust import stored_tiers_for
+    from .registry import domain_for
+
+    if symbols is None:
+        symbols = {_symbol_of(n) for n in store.load_manifest().get("bars", {})}
+    out = []
+    for sym in sorted(symbols):
+        for tier in stored_tiers_for(domain_for(sym)):
+            out.append((f"{sym}_{tier}" if tier else sym, sym, tier))
+    return out
+
+
 def build_snapshot(symbols: Optional[Iterable[str]] = None, *,
                    note: Optional[str] = None) -> dict:
     """Capture the store's current state for ``symbols`` (default: everything)."""
-    bars = store.load_manifest().get("bars", {})
-    if symbols is None:
-        symbols = sorted({name.split("/")[-1] for name in bars})
     entries: Dict[str, dict] = {}
     missing: List[str] = []
-    for sym in sorted(symbols):
+    for key, sym, tier in _stored_series(symbols):
         try:
-            p = provenance(sym)
+            p = provenance(sym, tier=tier)
+            if p is None:
+                raise KeyError(key)
         except Exception:
-            missing.append(sym)
+            missing.append(key)
             continue
-        entries[sym] = {
+        entries[key] = {
             "n_rows": p.n_rows, "first_date": p.first_date, "last_date": p.last_date,
             "source": p.source, "updated_at": p.updated_at, "domain": p.domain,
+            "symbol": p.symbol, "tier": p.tier,
         }
     if missing:
         raise KeyError(f"not in the store, cannot pin: {', '.join(missing)}")
@@ -76,11 +112,15 @@ def verify_snapshot(snap: dict) -> Tuple[bool, List[str]]:
     if not entries:
         return False, ["snapshot contains no symbols"]
 
-    for sym, pinned in sorted(entries.items()):
+    for key, pinned in sorted(entries.items()):
+        # A v1 snapshot has neither field, and its key IS the symbol.
+        sym, tier = pinned.get("symbol", key), pinned.get("tier")
         try:
-            p = provenance(sym)
+            p = provenance(sym, tier=tier)
+            if p is None:
+                raise KeyError(key)
         except Exception as e:
-            problems.append(f"{sym}: no longer in the store ({type(e).__name__})")
+            problems.append(f"{key}: no longer in the store ({type(e).__name__})")
             continue
         now = {"n_rows": p.n_rows, "first_date": p.first_date,
                "last_date": p.last_date, "source": p.source,
@@ -90,7 +130,7 @@ def verify_snapshot(snap: dict) -> Tuple[bool, List[str]]:
             if want is None:
                 continue          # older snapshot did not pin this field
             if want != got:
-                problems.append(f"{sym}.{field}: pinned {want!r}, store has {got!r}")
+                problems.append(f"{key}.{field}: pinned {want!r}, store has {got!r}")
     return (not problems), problems
 
 

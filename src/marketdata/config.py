@@ -11,9 +11,18 @@ import os
 from pathlib import Path
 
 # v1 — bars stored exactly as the vendor serves them (split-adjusted OHLCV for
-# yfinance) plus dated action columns. Every adjustment tier is derived on read
-# by marketdata.adjust; no adjusted column is ever stored.
-SCHEMA_VERSION = 1
+#      yfinance) plus dated action columns. Every adjustment tier is derived on
+#      read by marketdata.adjust; no adjusted column is ever stored.
+# v2 — the futures domain arrives, and it does not fit v1's one-frame-per-symbol
+#      assumption. Every equity tier is derivable from a single stored frame
+#      because corporate actions are DATED EVENTS the vendor hands over with the
+#      bars. Norgate's back-adjustment is not: it is vendor-computed roll
+#      splicing, recoverable from no other single series, so `backadj` and
+#      `unadj` are two separate stored facts rather than one frame plus a
+#      derivation. Hence the stored-tier component in the filename
+#      (`<symbol>_<tier>.parquet`), used by futures and absent for equities —
+#      whose v1 layout is unchanged and still read by exactly the same path.
+SCHEMA_VERSION = 2
 
 #: Can this store's symbol universe be sliced AS IT STOOD on a past date?
 #:
@@ -63,6 +72,33 @@ def bars_dir(domain: str, source: str) -> Path:
     possible at all.
     """
     return store_root() / "bars" / _safe(domain, "domain") / _safe(source, "price source")
+
+
+def bars_path(symbol: str, domain: str, source: str, tier: str | None = None) -> Path:
+    """The parquet holding one stored series.
+
+    ``tier`` names a series the VENDOR computed and we therefore have to keep,
+    not a tier we can derive. Equities pass ``None`` and keep the flat
+    ``<symbol>.parquet`` of schema v1; futures pass ``'backadj'`` / ``'unadj'``
+    and get ``<symbol>_<tier>.parquet``, because Norgate's roll splicing cannot
+    be reconstructed from the unadjusted series alone.
+
+    A derived tier never appears here. ``propadj`` is computed on read from the
+    two stored futures frames, exactly as the equity tiers are computed from the
+    one stored equity frame.
+    """
+    name = f"{_safe(symbol, 'symbol')}_{_safe(tier, 'stored tier')}" if tier \
+        else _safe(symbol, "symbol")
+    return bars_dir(domain, source) / f"{name}.parquet"
+
+
+def metadata_dir() -> Path:
+    """``metadata/`` — tables keyed by symbol rather than by date.
+
+    Contract specifications live here. Unlike bars, this is ONE table for every
+    symbol, which is why writing it needs an upsert (see ``store.upsert_metadata``).
+    """
+    return store_root() / "metadata"
 
 
 def manifest_path() -> Path:
