@@ -23,6 +23,19 @@ moves every bar here.
 uv venv --python 3.11 && uv pip install -e ".[yahoo,dev]" "setuptools<81"
 ```
 
+From an index, the distribution is **`crucible-marketdata`** and the import stays
+`marketdata`:
+
+```bash
+uv pip install crucible-marketdata     # then: import marketdata
+```
+
+The two differ because `marketdata` is taken on PyPI by an unrelated, abandoned
+project (`marketData` 0.2.0, last released 2020-04-19 — PyPI normalises both to the
+same name). Same split as `python-dateutil` → `import dateutil`. **A dependency on
+this package must name `crucible-marketdata`**, since that is what pip resolves;
+depending on `marketdata` would fetch a stranger's 2020 module.
+
 On the **Windows futures producer**, add the `norgate` extra — nothing else pulls
 `norgatedata`, and without it `--domain futures` stops before it fetches:
 

@@ -3,9 +3,22 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "marketdata"
+# The DISTRIBUTION name. The IMPORT name is `marketdata` and does not change —
+# `pip install crucible-marketdata` then `import marketdata`, the same split as
+# python-dateutil/dateutil or scikit-learn/sklearn.
+#
+# They differ because `marketdata` is taken on PyPI by an unrelated, abandoned
+# project (`marketData` 0.2.0, last released 2020-04-19; PyPI normalises both to
+# `marketdata`). Renaming the import package instead would have churned every
+# consumer that had just been repointed onto it, to no benefit.
+#
+# `crucible-` ties it to crucible-stack, where the ADR that created this package
+# lives. Deliberately NOT `cot-`: ADR-0007's whole point is that bars are not
+# COT-specific, and a name saying otherwise would undo the distinction the split
+# exists to draw.
+name = "crucible-marketdata"
 version = "0.1.0"
-description = "Equity/ETF daily bars — a producer/consumer split over a file store, with corporate-action adjustment derived on read."
+description = "Daily bars — equities, ETFs and futures — as a producer/consumer split over a file store, with adjustment derived on read."
 readme = "README.md"
 authors = [
     {name = "Matt S.", email = "cotanalyzer@gmail.com"}
