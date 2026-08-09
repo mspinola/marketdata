@@ -52,6 +52,12 @@ yahoo = ["yfinance>=1.5.2"]
 # provider guards the import and the service separately: a missing package and a
 # stopped NDU are different problems with different fixes.
 norgate = ["norgatedata"]
+# The cross-platform futures producer, and the only paid-API path here. An extra
+# rather than a dependency because a research box on Norgate never calls it and
+# should not carry the SDK — and because installing it is a spending decision:
+# Stage 1 (`--ingest-databento`) is billed per query. Stage 2 (`--build-databento`)
+# needs neither the key nor the network.
+databento = ["databento>=0.30"]
 dev = ["pytest>=7", "ruff==0.15.22"]
 
 [project.scripts]

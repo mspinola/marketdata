@@ -7,8 +7,8 @@ does not live in cotdata).
 Which vendor prices a symbol is a DEPLOYMENT choice, not a fixed identity fact.
 It resolves at runtime from three inputs: the deployment default
 ($MARKETDATA_PRICE_SOURCE, 'yfinance' if unset), per-symbol capability (the yahoo /
-norgate mappings, null where a vendor has no series), and an optional per-symbol
-override. One provider owns a symbol end to end; a series is never blended.
+norgate / databento mappings, null where a vendor has no series), and an optional
+per-symbol override. One provider owns a symbol end to end; a series is never blended.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from typing import Dict, List, Optional
 
 import yaml
 
-PRICE_SOURCES = ("yfinance", "norgate")
+PRICE_SOURCES = ("yfinance", "norgate", "databento")
 
 # Instrument domains. The domain sets the adjustment axis (see adjust.DOMAIN_TIERS)
 # and is a path component in the store, so a futures ES and an equity ES could
@@ -35,6 +35,14 @@ class Symbol:
     domain: str = DEFAULT_DOMAIN
     yahoo: Optional[str] = None
     norgate: Optional[str] = None
+    # Databento GLBX.MDP3 continuous root — the producer queries "<databento>.n.0".
+    # FUTURES ONLY: it defaults to the internal symbol there and is always None on
+    # equities, because GLBX carries no equities and a defaulted value would let
+    # `resolve_source` route SPY to a vendor that cannot serve it. cotdata's registry
+    # defaults it unconditionally, which is safe only because that registry has one
+    # domain. Explicit `databento: null` marks a futures market GLBX does not carry
+    # (ICE softs, lumber, the dollar index).
+    databento: Optional[str] = None
     price_source: Optional[str] = None
     inception: Optional[str] = None
     note: Optional[str] = None
@@ -123,6 +131,7 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
                 domain=dom,
                 yahoo=attrs.get("yahoo", internal),
                 norgate=attrs.get("norgate", internal),
+                databento=attrs.get("databento", internal if dom == "futures" else None),
                 price_source=_validate_source(attrs.get("price_source"), internal),
                 inception=attrs.get("inception"),
                 note=attrs.get("note"),
@@ -130,7 +139,7 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
             if resolve_source(sym) is None:
                 raise ValueError(
                     f"marketdata registry: symbol '{internal}' has no vendor that can "
-                    f"serve it (yahoo and norgate are both null).")
+                    f"serve it (yahoo, norgate and databento are all null).")
             registry[internal] = sym
     return registry
 
@@ -140,6 +149,8 @@ def _can_serve(sym: Symbol, source: str) -> bool:
         return sym.yahoo is not None
     if source == "norgate":
         return sym.norgate is not None
+    if source == "databento":
+        return sym.databento is not None
     raise ValueError(f"unknown price source {source!r}; expected one of {PRICE_SOURCES}")
 
 

@@ -36,6 +36,13 @@ same name). Same split as `python-dateutil` → `import dateutil`. **A dependenc
 this package must name `crucible-marketdata`**, since that is what pip resolves;
 depending on `marketdata` would fetch a stranger's 2020 module.
 
+For the **databento futures producer** (any OS, and the only paid-API path here),
+add the `databento` extra:
+
+```bash
+uv pip install -e ".[yahoo,databento,dev]" "setuptools<81"
+```
+
 On the **Windows futures producer**, add the `norgate` extra — nothing else pulls
 `norgatedata`, and without it `--domain futures` stops before it fetches:
 
@@ -59,9 +66,52 @@ marketdata-update --check                   # read-only summary, no network
 
 marketdata-update --bars --domain futures --require-final   # only once Norgate has settled
 
+marketdata-update --ingest-databento        # databento Stage 1 (PAID), any OS
+marketdata-update --build-databento         # databento Stage 2 (FREE, offline)
+
 marketdata-update --pin snap.json           # capture the store's state
 marketdata-update --verify-pin snap.json    # prove it has not moved, exit 1 on drift
 ```
+
+### Futures without Norgate: the databento producer
+
+A box that cannot run Norgate — a Linux dashboard server, most obviously — can produce
+futures bars from [Databento](https://databento.com/) GLBX.MDP3 instead. One provider
+owns a symbol end to end (ADR-0006); a series is never blended.
+
+```bash
+export MARKETDATA_STORE=~/code/marketdata_store
+export DATABENTO_API_KEY=db-...             # Stage 1 only
+# optional: MARKETDATA_DATABENTO_RAW=/path  (default: _raw/databento under the store)
+
+marketdata-update --ingest-databento --windowed-n1-stats   # Stage 1: PAID
+marketdata-update --build-databento                        # Stage 2: FREE
+```
+
+**Two stages, and only one costs money.** Stage 1 pulls raw `.n.0`/`.n.1` `ohlcv-1d`
+and `statistics` into an append-only raw store, resuming from each table's last fetched
+date, so a re-run or a mid-pull failure pulls only what is missing. Stage 2 reads that
+local store with no API and no network, so the back-adjustment can be iterated for free.
+The raw store is producer-internal — keep `_raw/` out of any sync to consumers.
+
+`--windowed-n1-stats` fetches the second contract's statistics only around roll dates.
+Its settlement is read only at rolls, so this drops the largest avoidable download with
+no accuracy loss; worth it on a cold-start backfill.
+
+**Not a Norgate replacement.** History starts at the GLBX floor (2010-06-06) against
+Norgate's decades, and eight registry markets are not on CME Globex at all — the ICE
+softs, lumber and the dollar index carry `databento: null` and are skipped rather than
+paid for. Local research stays on Norgate.
+
+**If the resume ledger and the disk disagree**, `--reconcile-databento` repairs both
+directions from local files: it records tables an interrupted run left unrecorded, and
+prunes entries whose parquet is missing. The second is the one that matters — such an
+entry still carries a current `last_date`, so a restart skips it as "already current"
+and leaves a permanent hole in a paid dataset with no error anywhere.
+
+Both vendors land in the same store under different paths
+(`bars/futures/norgate/` beside `bars/futures/databento/`), which is what makes
+`scripts/validate_databento_vs_norgate.py` a single-store comparison.
 
 ### Pinning a store for a study
 
@@ -147,7 +197,13 @@ $MARKETDATA_STORE/
   bars/<domain>/<source>/<symbol>_<tier>.parquet   # futures  — one per stored tier
   metadata/contract_specs.parquet                  # futures point value, tick size, margin
   manifest.json
+  _raw/databento/                                  # PRODUCER-INTERNAL, do not sync
 ```
+
+The leading underscore marks `_raw/` as not a consumer domain. It holds databento's
+append-only bronze store — the paid Stage-1 landing area that Stage 2 rebuilds from —
+and it is both the largest thing in the store and useless to a reader. Exclude it from
+any sync.
 
 The vendor is part of the **path**, not just the manifest. Yahoo and Norgate overlap
 almost completely on equities and ETFs and do not store the same columns, so a single
