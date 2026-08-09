@@ -112,7 +112,7 @@ Energies:
   RB:  {norgate: "&RB",  yahoo: null}
   HO:  {norgate: "&HO",  yahoo: null}
   NG:  {norgate: "&NG",  yahoo: null}
-  WBS: {norgate: "&WBS", yahoo: null, note: "WTI Crude Oil (ICE Futures Europe). Not a duplicate of CL — different holder base."}
+  WBS: {norgate: "&WBS", yahoo: null, databento: null, note: "WTI Crude Oil (ICE Futures Europe). Not a duplicate of CL — different holder base."}
 
 Grains:
   ZC: {norgate: "&ZC", yahoo: null}
@@ -136,7 +136,7 @@ Currencies:
   6S: {norgate: "&6S", yahoo: null}
   6M: {norgate: "&6M", yahoo: null}
   6N: {norgate: "&6N", yahoo: null}
-  DX: {norgate: "&DX", yahoo: null, note: "US Dollar Index (ICE)"}
+  DX: {norgate: "&DX", yahoo: null, databento: null, note: "US Dollar Index (ICE)"}
 
 Fixed Income:
   ZN: {norgate: "&ZN", yahoo: null}
@@ -145,12 +145,12 @@ Fixed Income:
   ZB: {norgate: "&ZB", yahoo: null}
 
 Softs:
-  SB:  {norgate: "&SB",  yahoo: null}
-  CT:  {norgate: "&CT",  yahoo: null}
-  CC:  {norgate: "&CC",  yahoo: null}
-  KC:  {norgate: "&KC",  yahoo: null}
-  OJ:  {norgate: "&OJ",  yahoo: null}
-  LBR: {norgate: "&LBR", yahoo: null, note: "CME Lumber (physical), listed 2022-08"}
+  SB:  {norgate: "&SB",  yahoo: null, databento: null}
+  CT:  {norgate: "&CT",  yahoo: null, databento: null}
+  CC:  {norgate: "&CC",  yahoo: null, databento: null}
+  KC:  {norgate: "&KC",  yahoo: null, databento: null}
+  OJ:  {norgate: "&OJ",  yahoo: null, databento: null}
+  LBR: {norgate: "&LBR", yahoo: null, databento: null, note: "CME Lumber (physical), listed 2022-08"}
 
 Live Stock:
   LE: {norgate: "&LE", yahoo: null}

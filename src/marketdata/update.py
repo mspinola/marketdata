@@ -65,6 +65,37 @@ def main(argv=None) -> int:
                         "below the earliest evening publish and above any daytime "
                         "refresh, and Norgate's publish time drifts. Accepted so a "
                         "scheduler carrying cotdata's flag does not break.")
+    p.add_argument("--ingest-databento", action="store_true",
+                   help="databento Stage 1 (PAID, any OS): fetch raw .n.0/.n.1 "
+                        "ohlcv-1d + statistics into the append-only raw store "
+                        "($MARKETDATA_DATABENTO_RAW, else _raw/databento under the "
+                        "store). Resumable — a re-run, or a mid-pull failure, only "
+                        "pulls the missing dates. Needs DATABENTO_API_KEY.")
+    p.add_argument("--build-databento", action="store_true",
+                   help="databento Stage 2 (FREE, no API): build backadj+unadj futures "
+                        "bars from the raw store. Run after --ingest-databento. Reads "
+                        "only local files, so the adjustment logic can be iterated at "
+                        "no cost.")
+    p.add_argument("--windowed-n1-stats", nargs="?", type=int, const=3, default=None,
+                   metavar="DAYS",
+                   help="with --ingest-databento: fetch the n.1 statistics schema only "
+                        "in ±DAYS windows around roll dates (default 3) instead of full "
+                        "history. n.1 settlement is read only at rolls, so this cuts the "
+                        "biggest avoidable download with no accuracy loss. Recommended "
+                        "for a cold-start backfill.")
+    p.add_argument("--batch", action="store_true",
+                   help="with --ingest-databento: use databento's BATCH API (prepare + "
+                        "download) instead of the default paged streaming ingest. A "
+                        "single from-inception continuous job can 504 at the gateway, "
+                        "so streaming is the better cold-start default; reach for "
+                        "--batch on a bounded catch-up.")
+    p.add_argument("--reconcile-databento", action="store_true",
+                   help="make the databento ingest manifest match the raw parquet on "
+                        "disk, in BOTH directions: record tables an interrupted run left "
+                        "unrecorded (so a restart does not re-pay for them), and prune "
+                        "entries whose file is missing (so a restart does not skip them "
+                        "as 'already current' and leave a silent hole in paid data). "
+                        "Local files only, no API. Exits after.")
     p.add_argument("--symbols", nargs="+", metavar="SYM",
                    help="scope the fetch to these internal symbols")
     p.add_argument("--check", action="store_true",
@@ -86,9 +117,11 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
 
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
-            or args.stamp_flags):
+            or args.stamp_flags or args.ingest_databento or args.build_databento
+            or args.reconcile_databento):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
-                "--verify-pin or --stamp-flags")
+                "--verify-pin, --stamp-flags, --ingest-databento, --build-databento "
+                "or --reconcile-databento")
 
     # Refuse a gate that cannot gate anything, rather than accepting the flag and
     # doing nothing with it: a scheduled task that silently ignores --require-final
@@ -101,10 +134,41 @@ def main(argv=None) -> int:
                     "settled-versus-interim distinction and there is no Norgate "
                     "session to wait for, so the flag would be a no-op here. Drop "
                     "it, or use --domain futures.")
+    # Same rule as --require-final: a modifier that cannot modify anything is
+    # refused, not ignored. `--windowed-n1-stats` on a run with no ingest looks like
+    # it bounded a paid download and bounded nothing.
+    for flag, val in (("--windowed-n1-stats", args.windowed_n1_stats is not None),
+                      ("--batch", args.batch)):
+        if val and not args.ingest_databento:
+            p.error(f"{flag} modifies the databento ingest. Pass it with "
+                    f"--ingest-databento.")
+
     if args.final_cutoff:
         print(f"note: --final-cutoff {args.final_cutoff} is deprecated and ignored. "
               f"The finals gate is data-driven (a newer settled bar than the store "
               f"holds), so it needs no cutoff and no trading calendar.")
+
+    # Reconcile is read-only on the API and repairs the resume ledger, so it runs
+    # before anything that would consult it and exits on its own.
+    if args.reconcile_databento:
+        from .providers import databento as dprov
+        res = dprov.reconcile_manifest()
+        recorded, pruned = res["recorded"], res["pruned"]
+        if not recorded and not pruned:
+            print("databento reconcile: manifest already matches the raw store.")
+        if recorded:
+            syms = sorted({k.split(".n.")[0] for k in recorded})
+            print(f"databento reconcile: recorded {len(recorded)} raw table(s) across "
+                  f"{len(syms)} symbol(s) into the ingest manifest.")
+            print("  symbols: " + ", ".join(syms))
+        if pruned:
+            syms = sorted({k.split(".n.")[0] for k in pruned})
+            print(f"databento reconcile: PRUNED {len(pruned)} manifest entr"
+                  f"{'y' if len(pruned) == 1 else 'ies'} with no parquet on disk, across "
+                  f"{len(syms)} symbol(s). The next --ingest-databento re-fetches these; "
+                  f"without the prune it would skip them as 'already current'.")
+            print("  symbols: " + ", ".join(syms))
+        return 0
 
     if args.stamp_flags:
         m = store.stamp_flags()
@@ -185,8 +249,25 @@ def main(argv=None) -> int:
                     return 1
                 print(f"\nskipping futures: {e}")
 
+    # databento is a SEPARATE action rather than a --bars source, because it is the
+    # only two-stage producer here: one paid fetch and one free rebuild, which does
+    # not fit a flag meaning "go get today's bars". Folding it into --bars would
+    # also make an unscoped run on a research box spend money by accident.
+    if args.ingest_databento:
+        from .providers import databento as dprov
+        if args.batch:
+            results.append(dprov.ingest_batch(args.symbols))
+        else:
+            results.append(dprov.ingest(args.symbols,
+                                        n1_stats_window=args.windowed_n1_stats))
+
+    if args.build_databento:
+        from .providers import databento as dprov
+        results.append(dprov.build(args.symbols))
+
     for res in results:
-        print(f"\n{res['kind']}: wrote={res['wrote']} failed={res['failed']}")
+        print(f"\n{res['kind']}: wrote={res.get('wrote', res.get('rows', 0))} "
+              f"failed={res.get('failed', 0)}")
         for sym, err in res.get("errors", []):
             print(f"  {sym}: {err}")
     # A defer is non-zero for the same reason a fetch failure is: Task Scheduler's
