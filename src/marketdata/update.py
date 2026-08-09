@@ -51,6 +51,20 @@ def main(argv=None) -> int:
                    help="with --bars on futures: rebuild the reconstructed-volume "
                         "columns over the whole history instead of the trailing "
                         "incremental window. For a reconstruction LOGIC change.")
+    p.add_argument("--require-final", action="store_true",
+                   help="with --bars on futures: fetch only once Norgate holds a "
+                        "NEWER settled session than the store already does. "
+                        "Otherwise defer with a non-zero exit, so a scheduler's "
+                        "restart-on-failure turns 'fire at 9pm' into 'run when the "
+                        "Finals land'. Futures only: yfinance has no settled/interim "
+                        "distinction to gate on.")
+    p.add_argument("--final-cutoff", metavar="HH:MM",
+                   help="DEPRECATED and IGNORED. The gate is data-driven (is there a "
+                        "newer settled bar than the store holds?), not a wall-clock "
+                        "cutoff, because no single clock value is safe: it has to sit "
+                        "below the earliest evening publish and above any daytime "
+                        "refresh, and Norgate's publish time drifts. Accepted so a "
+                        "scheduler carrying cotdata's flag does not break.")
     p.add_argument("--symbols", nargs="+", metavar="SYM",
                    help="scope the fetch to these internal symbols")
     p.add_argument("--check", action="store_true",
@@ -75,6 +89,22 @@ def main(argv=None) -> int:
             or args.stamp_flags):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin or --stamp-flags")
+
+    # Refuse a gate that cannot gate anything, rather than accepting the flag and
+    # doing nothing with it: a scheduled task that silently ignores --require-final
+    # looks protected and is not.
+    if args.require_final:
+        if not args.bars:
+            p.error("--require-final gates the futures bars fetch. Pass it with --bars.")
+        if args.domain == "equities":
+            p.error("--require-final is futures-only. yfinance publishes no "
+                    "settled-versus-interim distinction and there is no Norgate "
+                    "session to wait for, so the flag would be a no-op here. Drop "
+                    "it, or use --domain futures.")
+    if args.final_cutoff:
+        print(f"note: --final-cutoff {args.final_cutoff} is deprecated and ignored. "
+              f"The finals gate is data-driven (a newer settled bar than the store "
+              f"holds), so it needs no cutoff and no trading calendar.")
 
     if args.stamp_flags:
         m = store.stamp_flags()
@@ -114,6 +144,7 @@ def main(argv=None) -> int:
         return _check()
 
     results = []
+    deferred = False
     if args.metadata:
         from .providers import norgate as nprov
         results.append(nprov.update_metadata(args.symbols))
@@ -131,7 +162,23 @@ def main(argv=None) -> int:
             # domain was named explicitly the user asked for futures specifically,
             # so the real error is theirs to see.
             try:
-                results.append(nprov.update(args.symbols, full=args.full))
+                # The gate lives inside this try on purpose: it probes NDU first,
+                # so on a machine without Norgate it raises the same RuntimeError
+                # the fetch would, and an unscoped run skips futures as before
+                # rather than dying on the gate.
+                ready = True
+                if args.require_final:
+                    ready, detail = nprov.finals_ready()
+                if ready:
+                    results.append(nprov.update(args.symbols, full=args.full))
+                else:
+                    deferred = True
+                    print("futures: Norgate has no newer settled session than the "
+                          "store already holds. Deferring (--require-final).")
+                    for sym, d in sorted(detail.get("per_symbol", {}).items()):
+                        print(f"  {sym:5s} norgate {str(d['norgate_last']):10s} "
+                              f"store {str(d['store_last']):10s} "
+                              f"{'ready' if d['ready'] else 'waiting'}")
             except RuntimeError as e:
                 if args.domain == "futures":
                     print(f"\n{e}")
@@ -142,6 +189,12 @@ def main(argv=None) -> int:
         print(f"\n{res['kind']}: wrote={res['wrote']} failed={res['failed']}")
         for sym, err in res.get("errors", []):
             print(f"  {sym}: {err}")
+    # A defer is non-zero for the same reason a fetch failure is: Task Scheduler's
+    # restart-on-failure is the retry loop, and each retry is a cheap date compare
+    # that exits immediately until the Finals land. Exhausting the retries on a
+    # no-session day is the harmless case, not the failure.
+    if deferred:
+        return 1
     return 0 if all(r["ok"] for r in results) else 1
 
 

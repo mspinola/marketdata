@@ -57,6 +57,8 @@ marketdata-update --bars --domain equities  # skip futures (no Norgate on this b
 marketdata-update --metadata                # futures contract specs (Windows + Norgate)
 marketdata-update --check                   # read-only summary, no network
 
+marketdata-update --bars --domain futures --require-final   # only once Norgate has settled
+
 marketdata-update --pin snap.json           # capture the store's state
 marketdata-update --verify-pin snap.json    # prove it has not moved, exit 1 on drift
 ```
@@ -210,8 +212,41 @@ producers would eventually drop each other's entries.
 Python, virtualenv and Task Scheduler setup are identical to cotdata's and are
 not duplicated here — see
 [cotdata's Windows setup guide](https://github.com/mspinola/cotdata/blob/main/docs/WINDOWS_SETUP.md).
-The only marketdata-specific pieces are the `norgate` extra in **Install** above
-and the two variables here.
+The only marketdata-specific pieces are the `norgate` extra in **Install** above,
+the two variables here, and the finals gate below.
+
+### Waiting for Norgate's Finals
+
+Schedule the nightly futures run with `--require-final`:
+
+```cmd
+marketdata-update --bars --domain futures --require-final
+```
+
+Norgate's Final futures prices land in the evening, but the Norgate Data Updater
+still has to *pull* them on its next poll. `--require-final` fetches only once
+Norgate holds a **newer settled session than the store already does** (checked
+across `ES`, `CL` and `ZC`, all of which must have advanced). Until then it prints
+which reference is lagging and **exits non-zero**.
+
+Give the task a **restart on failure** in Task Scheduler. That turns "fire at 9pm"
+into "run the moment the Finals land": each retry is one short date comparison that
+exits immediately until they do, and on a weekend or holiday the retries simply
+exhaust, harmlessly. `schtasks` cannot set restart-on-failure, so use PowerShell, as
+in [cotdata's scheduling guide](https://github.com/mspinola/cotdata/blob/main/docs/WINDOWS_SCHEDULING.md).
+
+The gate is **opt-in and futures-only**. Without the flag the run is unconditional
+as before; with `--domain equities` it is refused rather than ignored, because
+yfinance has no settled-versus-interim distinction to gate on. `--final-cutoff` is
+accepted and ignored, so a scheduler carrying cotdata's flag does not break: the
+gate compares data, not clocks, and [docs/design.md](docs/design.md) records why
+(cotdata's fixed cutoff deferred every attempt on 2026-07-27, when Norgate
+published at 8:49pm against a 20:55 threshold).
+
+If the bars task is currently **chained behind cotdata's `run-prices.cmd`** with an
+`ERRORLEVEL` guard, cotdata's gate has been protecting this one. That still works;
+the flag makes the task correct on its own, so the chain becomes a convenience
+rather than the only thing standing between the store and an unsettled bar.
 
 ## Tests
 
