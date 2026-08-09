@@ -412,3 +412,47 @@ def test_provenance_reports_each_futures_tier_separately(tmp_store):
     assert provenance("ES").n_rows == 3
     assert provenance("ES", tier="unadj").n_rows == 2
     assert "backadj" in provenance("ES").describe()
+
+
+# ── Packaging ─────────────────────────────────────────────────────────────
+def test_the_norgate_extra_is_declared():
+    """A provider whose vendor package nothing installs is a provider nobody can run.
+
+    This shipped missing: the futures provider landed with no `norgate` extra, so
+    `--domain futures` on the Windows producer stopped at the import guard with the
+    package never having been pulled. The guard did its job; the packaging had not.
+    """
+    from pathlib import Path
+
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    extras = tomllib.loads(pyproject.read_text())["project"]["optional-dependencies"]
+    assert "norgate" in extras, (
+        "providers/norgate.py imports norgatedata, but no extra installs it")
+    assert any("norgatedata" in dep for dep in extras["norgate"])
+
+
+def test_the_missing_package_message_names_the_extra_that_fixes_it():
+    """Two different problems with two different fixes: a missing package is an
+    install away on Windows, and unfixable anywhere else. The message has to
+    separate them or it sends the Windows producer to --domain equities."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_norgatedata(name, *a, **kw):
+        if name == "norgatedata":
+            raise ImportError("No module named 'norgatedata'")
+        return real_import(name, *a, **kw)
+
+    builtins.__import__ = no_norgatedata
+    try:
+        with pytest.raises(RuntimeError) as e:
+            nprov._require_norgate_service()
+    finally:
+        builtins.__import__ = real_import
+
+    msg = str(e.value)
+    assert "[norgate]" in msg          # the fix, for the box that can be fixed
+    assert "Windows" in msg            # and why it is not the fix anywhere else

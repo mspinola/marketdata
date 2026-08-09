@@ -23,6 +23,17 @@ moves every bar here.
 uv venv --python 3.11 && uv pip install -e ".[yahoo,dev]" "setuptools<81"
 ```
 
+On the **Windows futures producer**, add the `norgate` extra — nothing else pulls
+`norgatedata`, and without it `--domain futures` stops before it fetches:
+
+```bash
+uv pip install -e ".[yahoo,norgate,dev]" "setuptools<81"
+```
+
+Installing it elsewhere does not help. It drives a locally installed Norgate Data
+Updater rather than an API, and NDU is Windows-only, so every other machine reads
+a synced store instead of producing one.
+
 ## Use
 
 ```bash
