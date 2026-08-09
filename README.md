@@ -113,6 +113,10 @@ Both vendors land in the same store under different paths
 (`bars/futures/norgate/` beside `bars/futures/databento/`), which is what makes
 `scripts/validate_databento_vs_norgate.py` a single-store comparison.
 
+**Scheduling it:** [docs/LINUX_SCHEDULING.md](docs/LINUX_SCHEDULING.md) — the wrapper, the
+crontab line, why the cold-start backfill is not the nightly job, and what to do when the
+resume ledger and the disk disagree.
+
 ### Pinning a store for a study
 
 A study that quotes numbers is only reproducible if the data behind them is
