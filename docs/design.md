@@ -171,6 +171,44 @@ use — they read a **synced** one. That is the answer, not a temporary state:
 failing, and `--domain futures` on such a box explains why instead of raising
 `ModuleNotFoundError`.
 
+### Verified against cotdata, 2026-08-09
+
+Run on the Windows producer with `scripts/verify_against_cotdata.py`, against a
+cotdata store built by the original producer. **Every compared series identical,
+exit 0.**
+
+| symbol | rows per tier | passthrough | reconstruction |
+|---|---:|---|---|
+| ES | 7,279 | identical | identical |
+| CL | 10,887 | identical | identical |
+| GC | 12,156 | identical | identical |
+| ZS | 12,271 | identical | identical |
+| DC | 7,299 | identical | identical |
+
+49,892 rows per tier, both tiers, plus contract specs for all five. Exact
+equality, not a tolerance: the two producers drive the same Norgate install
+through two code paths, so any difference would have been a port bug rather than
+vendor disagreement.
+
+Two things worth recording beyond the verdict.
+
+**The reconstruction columns matched too, which was not expected.** Both
+producers reconstruct volume incrementally over their own store's history, so a
+fresh marketdata store recomputing 12,000 bars and a cotdata store that
+accumulated them over months looked like a legitimate source of drift. They agree
+exactly, and the reason holds generally: Norgate's historical individual-contract
+volumes are immutable and the algorithm is the same, so the incremental path
+converges on what a full recompute produces. `--strict-volume` is therefore
+usable rather than theoretical.
+
+**The first two runs found defects offline testing could not.** `--domain
+futures` stopped at the import guard because the `norgate` extra was never
+declared, and the reconstruction columns turned out to have no consumer-side
+`volume=` switch — the producer wrote them and nothing served them. Neither is
+visible to a test suite that cannot install the vendor or call the missing
+parameter. The comparison harness is what caught the second, by reporting which
+columns it had NOT compared instead of staying silent about them.
+
 ### What is NOT ported
 
 `MME` and `MFS` (MSCI EM and EAFE). Norgate carries no continuous series for
