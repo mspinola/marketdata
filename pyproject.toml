@@ -32,6 +32,13 @@ Issues = "https://github.com/mspinola/marketdata/issues"
 # history(auto_adjust=...) has changed across yfinance versions — see
 # docs/design.md. Verified against 1.5.2.
 yahoo = ["yfinance>=1.5.2"]
+# The futures producer, WINDOWS ONLY. The package installs anywhere, but it drives
+# a locally installed Norgate Data Updater rather than an API, and NDU exists for
+# Windows alone — so on a Mac or Linux box it imports fine and then has nothing to
+# talk to. That is why this is an extra rather than a dependency, and why the
+# provider guards the import and the service separately: a missing package and a
+# stopped NDU are different problems with different fixes.
+norgate = ["norgatedata"]
 dev = ["pytest>=7", "ruff==0.15.22"]
 
 [project.scripts]

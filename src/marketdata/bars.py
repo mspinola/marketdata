@@ -32,6 +32,7 @@ def default_source_for(symbol: str) -> str:
 def get_bars(symbol: str, adjustment: Optional[str] = None, *,
              source: Optional[str] = None, domain: Optional[str] = None,
              start: Optional[str] = None, end: Optional[str] = None,
+             volume: str = "front",
              include_capital_gains: bool = False) -> pd.DataFrame:
     """Daily bars for `symbol`, adjusted to `adjustment`.
 
@@ -56,6 +57,23 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
                   where additive adjustment has driven the back-history through
                   zero (ZS, DC). See `adjust.ratio_adjust`.
 
+    `volume` selects which series the `Volume` column carries (futures only):
+      'front'         : continuous front-month volume as Norgate reports it.
+                        Default.
+      'reconstructed' : FirstVolume + SecondVolume — the two highest-volume
+                        expiries trading that day, with a per-row fall-back to
+                        front-month where individual contracts are unavailable.
+                        Adds a `Volume_Source` column ('reconstructed' / 'raw')
+                        so a consumer can tell the fall-back rows apart.
+
+    **Read those two again: the names are a trap, and it points the opposite way
+    to intuition.** `reconstructed` is NOT whole-market. It sums exactly two
+    expiries, which is 0.52 of total volume in natural gas and 0.54 in crude, so
+    it understates most in precisely the markets with the deepest curves.
+    `front` is the series to divide a whole-market quantity by. Measured in
+    crowdmon, whose `futures/volume.py` refuses anything but `front` for that
+    reason; carried here because the naming will mislead the next reader too.
+
     `domain` is resolved from the registry and rarely passed. `source` pins the
     vendor. Omit it and the registry resolves one for this deployment. Pass it
     explicitly to compare vendors on the same symbol, which is the point of
@@ -71,6 +89,13 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
     check_tier(adjustment, dom)
     src = source or default_source_for(symbol)
 
+    if volume not in ("front", "reconstructed"):
+        raise ValueError(f"volume must be 'front' or 'reconstructed', got {volume!r}")
+    if volume == "reconstructed" and dom != "futures":
+        raise ValueError(
+            f"volume='reconstructed' is a futures concept (it sums the two "
+            f"highest-volume expiries) and {symbol!r} is in domain {dom!r}.")
+
     if dom == "futures":
         out = _futures_bars(symbol, src, adjustment)
     else:
@@ -78,6 +103,8 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
                            include_capital_gains=include_capital_gains)
     if out.empty:
         return out
+    if volume == "reconstructed":
+        out = _reconstructed_volume(out)
 
     if start is not None:
         out = out[out.index >= pd.Timestamp(start)]
@@ -104,6 +131,29 @@ def _missing(symbol: str, dom: str, src: str, tier=None) -> None:
             f"{what} is not in the store under source {src!r} (domain {dom!r}), "
             f"but it is under {others}. Pass source= explicitly, or set "
             f"MARKETDATA_PRICE_SOURCE. Vendors are never silently substituted.")
+
+
+def _reconstructed_volume(df: pd.DataFrame) -> pd.DataFrame:
+    """Swap `Volume` for the reconstructed series, with a per-row fall-back.
+
+    The producer already writes `Volume_Reconstructed == Volume` on rows it could
+    not reconstruct, so reading the column is fall-back-safe where it exists. The
+    guards are for a store written before reconstruction, or a stray NaN: both
+    degrade to front-month volume and SAY SO in `Volume_Source`, because a
+    consumer comparing volume across symbols has to be able to exclude the rows
+    that are not really reconstructed.
+    """
+    out = df.copy()
+    if "Volume_Reconstructed" in out.columns:
+        rec = out["Volume_Reconstructed"]
+        out["Volume"] = rec.where(rec.notna(), out["Volume"])
+        if "Volume_Source" not in out.columns:
+            out["Volume_Source"] = "reconstructed"
+        out.loc[rec.isna(), "Volume_Source"] = "raw"
+    else:
+        # Store predates reconstruction, so every row is front-month.
+        out["Volume_Source"] = "raw"
+    return out
 
 
 def _equity_bars(symbol: str, dom: str, src: str, tier: str, *,

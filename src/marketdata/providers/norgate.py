@@ -87,9 +87,13 @@ def _require_norgate_service() -> None:
         # the normal state of every other machine.
         raise RuntimeError(
             "norgatedata is not installed, so this machine cannot produce futures "
-            "bars. It drives a local Norgate Data Updater install, which is "
-            "Windows-only — a Mac or Linux box reads a SYNCED store instead of "
-            "producing one. Use --domain equities here.") from e
+            "bars.\n"
+            "  On the Windows producer, this is just the missing extra:\n"
+            "      uv pip install -e \".[norgate]\"\n"
+            "  Anywhere else, installing it will not help: it drives a local "
+            "Norgate Data Updater install and NDU is Windows-only, so a Mac or "
+            "Linux box reads a SYNCED store rather than producing one. Use "
+            "--domain equities there.") from e
     try:
         reachable = bool(norgatedata.status())
     except BaseException:  # noqa: BLE001 — never let the probe itself take us down

@@ -412,3 +412,117 @@ def test_provenance_reports_each_futures_tier_separately(tmp_store):
     assert provenance("ES").n_rows == 3
     assert provenance("ES", tier="unadj").n_rows == 2
     assert "backadj" in provenance("ES").describe()
+
+
+# ── Packaging ─────────────────────────────────────────────────────────────
+def test_the_norgate_extra_is_declared():
+    """A provider whose vendor package nothing installs is a provider nobody can run.
+
+    This shipped missing: the futures provider landed with no `norgate` extra, so
+    `--domain futures` on the Windows producer stopped at the import guard with the
+    package never having been pulled. The guard did its job; the packaging had not.
+
+    Read as text rather than parsed: `tomllib` is stdlib only from 3.11 and this
+    package supports 3.10, so parsing would skip the check on the floor version —
+    the one most likely to be a stale producer environment.
+    """
+    import re
+    from pathlib import Path
+
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    declared = re.search(r"^norgate\s*=\s*\[([^\]]*)\]", pyproject, re.M)
+    assert declared, (
+        "providers/norgate.py imports norgatedata, but no extra installs it")
+    assert "norgatedata" in declared.group(1)
+
+
+def test_the_missing_package_message_names_the_extra_that_fixes_it():
+    """Two different problems with two different fixes: a missing package is an
+    install away on Windows, and unfixable anywhere else. The message has to
+    separate them or it sends the Windows producer to --domain equities."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_norgatedata(name, *a, **kw):
+        if name == "norgatedata":
+            raise ImportError("No module named 'norgatedata'")
+        return real_import(name, *a, **kw)
+
+    builtins.__import__ = no_norgatedata
+    try:
+        with pytest.raises(RuntimeError) as e:
+            nprov._require_norgate_service()
+    finally:
+        builtins.__import__ = real_import
+
+    msg = str(e.value)
+    assert "[norgate]" in msg          # the fix, for the box that can be fixed
+    assert "Windows" in msg            # and why it is not the fix anywhere else
+
+
+# ── Reconstructed volume, consumer side ───────────────────────────────────
+def _recon_frame():
+    df = frame([1.0, 2.0, 3.0])
+    df["Volume"] = [100.0, 200.0, 300.0]
+    df["Volume_Reconstructed"] = [150.0, 250.0, float("nan")]
+    df["Volume_Source"] = ["reconstructed", "reconstructed", "raw"]
+    return df
+
+
+def test_volume_defaults_to_front_month(tmp_store):
+    """The pre-existing shape. A caller that never heard of the parameter keeps
+    getting Norgate's continuous front-month volume."""
+    store.write_bars("ES", _recon_frame(), domain=FUT, source="norgate", tier="backadj")
+    assert list(bars.get_bars("ES", "backadj")["Volume"]) == [100.0, 200.0, 300.0]
+
+
+def test_reconstructed_volume_is_served_with_a_per_row_fallback(tmp_store):
+    """The producer writes the columns; this is the switch that serves them.
+    npf's ml/labels.py passes `volume=` through, so without it a repointed call
+    raises TypeError rather than returning the wrong number — but it still does
+    not work."""
+    store.write_bars("ES", _recon_frame(), domain=FUT, source="norgate", tier="backadj")
+    out = bars.get_bars("ES", "backadj", volume="reconstructed")
+
+    # Row 3 could not be reconstructed, so it falls back to front-month...
+    assert list(out["Volume"]) == [150.0, 250.0, 300.0]
+    # ...and says so, which is what lets a consumer exclude it.
+    assert list(out["Volume_Source"]) == ["reconstructed", "reconstructed", "raw"]
+
+
+def test_a_store_predating_reconstruction_degrades_to_raw_and_says_so(tmp_store):
+    store.write_bars("ES", frame([1.0, 2.0]), domain=FUT, source="norgate", tier="backadj")
+    out = bars.get_bars("ES", "backadj", volume="reconstructed")
+    assert list(out["Volume_Source"]) == ["raw", "raw"]
+    assert list(out["Volume"]) == [100.0, 100.0]
+
+
+def test_reconstructed_volume_is_refused_on_equities(tmp_store):
+    """It sums two expiries. An equity has none, and silently returning front-month
+    would answer a question that was not asked."""
+    store.write_bars("SPY", frame([1.0]), domain="equities", source="yfinance")
+    with pytest.raises(ValueError, match="futures concept"):
+        bars.get_bars("SPY", "split", volume="reconstructed")
+
+
+def test_an_unknown_volume_series_is_refused(tmp_store):
+    store.write_bars("ES", frame([1.0]), domain=FUT, source="norgate", tier="backadj")
+    with pytest.raises(ValueError, match="front"):
+        bars.get_bars("ES", "backadj", volume="whole_market")
+
+
+def test_reconstructed_is_a_subset_not_whole_market(tmp_store):
+    """The naming trap, pinned. `reconstructed` sums the two biggest expiries and
+    is therefore SMALLER than front-month-plus-everything-else; `front` is what a
+    whole-market denominator wants. crowdmon's volume.py refuses anything else for
+    exactly this reason, and the test exists so the docstring cannot drift from it."""
+    df = frame([1.0])
+    df["Volume"] = [1000.0]
+    df["Volume_Reconstructed"] = [520.0]      # ~natural gas's measured 0.52 ratio
+    df["Volume_Source"] = ["reconstructed"]
+    store.write_bars("NG", df, domain=FUT, source="norgate", tier="backadj")
+
+    front = bars.get_bars("NG", "backadj")["Volume"].iloc[0]
+    recon = bars.get_bars("NG", "backadj", volume="reconstructed")["Volume"].iloc[0]
+    assert recon < front

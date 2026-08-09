@@ -23,6 +23,17 @@ moves every bar here.
 uv venv --python 3.11 && uv pip install -e ".[yahoo,dev]" "setuptools<81"
 ```
 
+On the **Windows futures producer**, add the `norgate` extra — nothing else pulls
+`norgatedata`, and without it `--domain futures` stops before it fetches:
+
+```bash
+uv pip install -e ".[yahoo,norgate,dev]" "setuptools<81"
+```
+
+Installing it elsewhere does not help. It drives a locally installed Norgate Data
+Updater rather than an API, and NDU is Windows-only, so every other machine reads
+a synced store instead of producing one.
+
 ## Use
 
 ```bash
@@ -150,6 +161,44 @@ silently substituting a vendor is what ADR-0006 forbids.
 
 The store root may share a parent folder with cotdata's, but the two must not
 share a `manifest.json`. Both producers do a read-modify-write on it.
+
+### On the Windows futures producer
+
+That box now runs **two producers**, so it needs **both** store variables set at
+once, pointing at **different roots**. This is new with the futures domain: until
+ADR-0007 moved bars here, `COTDATA_STORE` alone was the whole story.
+
+```cmd
+setx COTDATA_STORE    C:\Users\YourUsername\cotdata_store
+setx MARKETDATA_STORE C:\Users\YourUsername\marketdata_store
+```
+
+`setx` persists; plain `set` lasts only for the current Command Prompt, which is
+the usual reason a scheduled task cannot find a store an interactive shell could.
+Open a NEW prompt afterwards — `setx` does not affect the one you typed it in —
+and verify:
+
+```cmd
+echo %COTDATA_STORE%
+echo %MARKETDATA_STORE%
+marketdata-update --check
+```
+
+`--check` reads the manifest and no network, so it is the cheap confirmation that
+the variable points where you think. An unset variable is refused by name rather
+than defaulted, because a silent default would write a second store somewhere
+nobody looks.
+
+**Do not point them at one root.** Sharing a parent folder is fine and makes the
+pair easy to sync; sharing a root is not, because both packages keep a
+`manifest.json` at their root and each does a read-modify-write on it, so the two
+producers would eventually drop each other's entries.
+
+Python, virtualenv and Task Scheduler setup are identical to cotdata's and are
+not duplicated here — see
+[cotdata's Windows setup guide](https://github.com/mspinola/cotdata/blob/main/docs/WINDOWS_SETUP.md).
+The only marketdata-specific pieces are the `norgate` extra in **Install** above
+and the two variables here.
 
 ## Tests
 
