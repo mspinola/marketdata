@@ -44,8 +44,21 @@ def store_root() -> Path:
     root = os.environ.get("MARKETDATA_STORE", "").strip()
     if not root:
         raise RuntimeError(
-            "MARKETDATA_STORE is not set. Point it at the equity/ETF bar store "
-            "(the folder holding bars/ and manifest.json)."
+            "MARKETDATA_STORE is not set. Point it at this package's bar store: "
+            "the folder holding bars/ and manifest.json, covering equities, ETFs "
+            "and futures.\n"
+            "  It is NOT cotdata's store. The two may share a parent folder, and "
+            "sharing one makes the pair easy to sync, but they must not share a "
+            "ROOT: each package keeps its own manifest.json there and each does a "
+            "read-modify-write on it, so two producers on one root drop each "
+            "other's entries.\n"
+            "  Windows (persists, though not in the prompt you type it in, so open "
+            "a NEW one afterwards):\n"
+            "      setx MARKETDATA_STORE %USERPROFILE%\\code\\marketdata_store\n"
+            "  macOS / Linux:\n"
+            "      export MARKETDATA_STORE=~/code/marketdata_store\n"
+            "  Then confirm with `marketdata-update --check`, which reads the "
+            "manifest and no network."
         )
     return Path(root)
 
