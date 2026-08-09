@@ -109,7 +109,8 @@ def compare_tier(cot: pd.DataFrame, mkt: pd.DataFrame) -> dict:
     """One stored tier, one symbol. Returns a report dict; `ok` is the verdict on
     the passthrough columns only."""
     rep: dict = {"cot_rows": len(cot), "mkt_rows": len(mkt),
-                 "passthrough": {}, "reconstruction": {}, "problems": []}
+                 "passthrough": {}, "reconstruction": {}, "problems": [],
+                 "not_compared": []}
     if cot.empty or mkt.empty:
         rep["problems"].append(
             "absent from " + ("cotdata" if cot.empty else "marketdata"))
@@ -147,9 +148,20 @@ def compare_tier(cot: pd.DataFrame, mkt: pd.DataFrame) -> dict:
                 f"{col}: {r['n_differing']} of {len(common)} rows differ "
                 f"(worst {r['worst_abs_diff']}, first {r['first_date']})")
 
+    # Coverage is reported, not just differences. A column absent from one store
+    # is skipped, and if that skip were silent it would look exactly like a
+    # column that matched — so a PASS could not be read as "everything was
+    # compared". Naming the untested columns is the difference between evidence
+    # and a green light.
     for col in RECONSTRUCTION:
-        if col in c.columns and col in m.columns:
+        in_c, in_m = col in c.columns, col in m.columns
+        if in_c and in_m:
             rep["reconstruction"][col] = compare_column(c[col], m[col])
+        elif in_c or in_m:
+            rep["not_compared"].append(
+                f"{col} (only in {'cotdata' if in_c else 'marketdata'})")
+        else:
+            rep["not_compared"].append(f"{col} (in neither store)")
 
     rep["ok"] = not rep["problems"]
     return rep
@@ -261,7 +273,7 @@ def main(argv=None) -> int:
             print(f"ERROR: {label} store does not exist: {path}")
             return 2
 
-    failures = []
+    failures, untested = [], []
     print(f"cotdata store    {cot_store}")
     print(f"marketdata store {mkt_store}\n")
 
@@ -288,6 +300,10 @@ def main(argv=None) -> int:
             if not rep["ok"]:
                 failures.append(f"{sym}/{tier}")
 
+            matched = [c for c, r in rep["reconstruction"].items()
+                       if not r["n_differing"]]
+            if matched:
+                print(f"       ok   reconstruction identical: {', '.join(matched)}")
             for col, r in rep["reconstruction"].items():
                 if r["n_differing"]:
                     note = ("FAIL" if args.strict_volume else "note")
@@ -296,6 +312,9 @@ def main(argv=None) -> int:
                           f"last run with --full")
                     if args.strict_volume:
                         failures.append(f"{sym}/{tier}/{col}")
+            if rep["not_compared"]:
+                print(f"       ??   NOT COMPARED: {'; '.join(rep['not_compared'])}")
+                untested.append(f"{sym}/{tier}")
 
         if args.check_propadj:
             r = check_propadj(sym, cot_store)
@@ -319,6 +338,10 @@ def main(argv=None) -> int:
         failures.append("contract_specs")
 
     print()
+    if untested:
+        print(f"NOTE: {len(untested)} tier(s) had columns present in only one store, or "
+              f"in neither, and those columns were NOT compared — see '?? NOT COMPARED' "
+              f"above. The verdict below covers what was compared.")
     if failures:
         print(f"FAILED: {len(failures)} check(s) — {', '.join(failures)}")
         print("\nThe two producers read the same Norgate install, so the passthrough "

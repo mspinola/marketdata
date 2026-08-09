@@ -248,3 +248,37 @@ def test_a_nonexistent_store_exits_two_rather_than_passing(verify, tmp_path):
     """A typo'd path must not read as 'nothing differed'."""
     assert verify.main(["--cotdata-store", str(tmp_path / "nope"),
                         "--marketdata-store", str(tmp_path)]) == 2
+
+
+# ── Coverage must be visible, or a PASS overstates itself ─────────────────
+def test_a_column_missing_from_one_store_is_named_not_silently_skipped(verify):
+    """The flaw a real run exposed. Reconstruction columns were reported only when
+    they DIFFERED, so 'compared and identical' and 'never compared' printed the
+    same nothing — and a PASS could not be told apart from a PASS that skipped
+    half the frame."""
+    cot = frame([1.0, 2.0])
+    cot["Volume_Reconstructed"] = [10.0, 20.0]
+    mkt = frame([1.0, 2.0])          # no reconstruction columns at all
+
+    rep = verify.compare_tier(cot, mkt)
+    assert rep["ok"]                                    # passthrough still agrees
+    assert any("Volume_Reconstructed" in s and "only in cotdata" in s
+               for s in rep["not_compared"])
+
+
+def test_columns_in_neither_store_are_also_named(verify):
+    rep = verify.compare_tier(frame([1.0]), frame([1.0]))
+    assert rep["ok"]
+    assert any("in neither store" in s for s in rep["not_compared"])
+
+
+def test_nothing_is_flagged_uncompared_when_both_stores_carry_it(verify):
+    cot = frame([1.0, 2.0])
+    for col, val in (("Volume_Reconstructed", 10.0), ("FirstVolume", 6.0),
+                     ("SecondVolume", 4.0), ("FirstContract", "ES-2020H"),
+                     ("SecondContract", "ES-2020M"), ("Volume_Source", "reconstructed")):
+        cot[col] = val
+    rep = verify.compare_tier(cot, cot.copy())
+    assert rep["ok"]
+    assert rep["not_compared"] == []
+    assert set(rep["reconstruction"]) == set(verify.RECONSTRUCTION)
