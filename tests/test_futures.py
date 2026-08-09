@@ -421,16 +421,19 @@ def test_the_norgate_extra_is_declared():
     This shipped missing: the futures provider landed with no `norgate` extra, so
     `--domain futures` on the Windows producer stopped at the import guard with the
     package never having been pulled. The guard did its job; the packaging had not.
+
+    Read as text rather than parsed: `tomllib` is stdlib only from 3.11 and this
+    package supports 3.10, so parsing would skip the check on the floor version —
+    the one most likely to be a stale producer environment.
     """
+    import re
     from pathlib import Path
 
-    import tomllib
-
-    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
-    extras = tomllib.loads(pyproject.read_text())["project"]["optional-dependencies"]
-    assert "norgate" in extras, (
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text()
+    declared = re.search(r"^norgate\s*=\s*\[([^\]]*)\]", pyproject, re.M)
+    assert declared, (
         "providers/norgate.py imports norgatedata, but no extra installs it")
-    assert any("norgatedata" in dep for dep in extras["norgate"])
+    assert "norgatedata" in declared.group(1)
 
 
 def test_the_missing_package_message_names_the_extra_that_fixes_it():
