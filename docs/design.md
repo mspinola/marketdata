@@ -171,6 +171,69 @@ use — they read a **synced** one. That is the answer, not a temporary state:
 failing, and `--domain futures` on such a box explains why instead of raising
 `ModuleNotFoundError`.
 
+### The finals gate is data-driven, not a clock
+
+`--require-final` exists so a nightly futures run cannot capture a session Norgate
+has not settled. It is opt-in, and futures-only: yfinance publishes no
+settled-versus-interim distinction, so there is nothing there to wait for.
+
+The gate asks one question, of the data rather than of the clock:
+
+```
+ready := norgate_latest_bar_date > store_latest_bar_date
+```
+
+evaluated across a quorum of liquid continuous references (`ES`, `CL`, `ZC`), all
+of which must have advanced, so one lagging reference cannot green-light a partial
+capture. Not ready means defer with a **non-zero exit**, so a scheduler's
+restart-on-failure becomes the retry loop: each retry is a short `price_timeseries`
+window and a date compare, and exits immediately until the Finals land. Exhausting
+the retries on a weekend or holiday is the harmless case.
+
+This mirrors cotdata's gate deliberately, including its correction. cotdata first
+implemented the check as a **wall-clock cutoff** on
+`norgatedata.last_database_update_time()` (`--final-cutoff`, default `20:55`), and
+it broke in production on **2026-07-27**: Norgate finalized the Futures database at
+8:49pm and Continuous Futures at 8:55pm, the check wanted both at or after 20:55,
+so the task deferred on every attempt and prices went stale on the prior Friday's
+bar. The failure is intrinsic to a clock threshold. It has to sit below the
+earliest evening publish and above any daytime refresh, and Norgate's publish time
+drifts night to night, so no single value is safe. A data comparison has no such
+window: an early publish means ready early, a late one means not there yet and a
+retry catches it.
+
+Two properties fall out of asking the data instead, and together they are why the
+trading-calendar question never arises. Weekends and holidays produce no new bar,
+so "no session today" and "session not settled yet" are the same answer and neither
+needs a calendar (`norgatedata` exposes none anyway). And **Norgate does not
+publish an in-progress session's bar at all** (probed on the Windows producer,
+cotdata 2026-07-28: at 11am Tuesday the latest continuous bar was Monday's final
+OHLC, with no Tuesday bar in existence). Bar presence is therefore already a
+settled-session signal, which is what lets the date comparison stand alone.
+
+`--final-cutoff` is accepted and ignored, with a printed note, so a scheduler
+carrying cotdata's flag does not break on it.
+
+**Why this is not merely defence in depth.** The store keeps no per-bar record of
+whether a value was interim, and neither the manifest nor a pin would reveal one:
+they carry `updated_at`, row counts and date spans, none of which move when a value
+is revised in place at the same date. An ungated capture of a provisional bar would
+be invisible after the fact. The gate is what stops that from needing to be
+detectable.
+
+**Already-stored bars need no backfill, and could not have one.** Detection is
+impossible for the reason just given, but it is also unnecessary, because the
+producer is a full-history rewrite rather than an append: `fetch` pulls from
+1970 and `store.write_bars` replaces the whole parquet, so every successful run
+restates all OHLC and open interest from Norgate's current values. Any bar that
+was ever provisional has already been overwritten with the settled one. The single
+exception is the reconstructed-volume columns, which recompute only over a trailing
+60-day window and otherwise carry forward what the store held. If there is ever
+a reason to suspect an old volume figure, `--bars --domain futures --full` is the
+one-shot that rebuilds them, and it is the same command a reconstruction-logic
+change already calls for. The gate therefore applies going forward only, which is
+the whole of what it needs to cover.
+
 ### Verified against cotdata, 2026-08-09
 
 Run on the Windows producer with `scripts/verify_against_cotdata.py`, against a
