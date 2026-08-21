@@ -70,23 +70,17 @@ Broad Bond ETF:
     yahoo: "AGG"
     inception: "2003-09-22"
 
-Volatility Index:
-  VIX:
-    yahoo: "^VIX"
-    inception: "1990-01-02"
-    note: "CBOE 30-day implied vol index. No corporate actions, so the split/raw tiers are a passthrough. It is an implied-vol series, not a tradable price."
-  VXN:
-    yahoo: "^VXN"
-    inception: "2001-01-23"
-    note: "CBOE Nasdaq-100 implied vol. Implied series, not tradable. Realized counterpart: NQ."
-  OVX:
-    yahoo: "^OVX"
-    inception: "2007-05-10"
-    note: "CBOE crude-oil ETF (USO) implied vol. Implied series, not tradable. Realized counterpart: CL."
-  GVZ:
-    yahoo: "^GVZ"
-    inception: "2008-06-03"
-    note: "CBOE gold ETF (GLD) implied vol. Implied series, not tradable. Realized counterpart: GC."
+# The four CBOE implied-vol indices (VIX, VXN, OVX, GVZ) were removed on 2026-08-21.
+# They were fetchable but nothing in the store's own governance kept them: the workspace
+# notes had recorded them as "deliberately let go" since July while they sat here in the
+# registry, so every unscoped `--bars --domain equities` fetched them back. The prose and
+# the registry disagreed, and the registry is what runs.
+#
+# CONSEQUENCE, recorded because it is not visible from here: npf/trading_riot maps all
+# four to a realized counterpart (VIX->ES, VXN->NQ, OVX->CL, GVZ->GC) for a variance
+# risk premium study, and its data.py documents fetching them with
+# `--bars --symbols VIX`. That command now reports "no registry symbols resolve to this
+# provider" and exits 0, writing nothing. Re-add the block below to unblock that work.
 
 # ── Futures ───────────────────────────────────────────────────────────────
 # Ported from cotdata's registry (ADR-0007 step 2: bars move here, CFTC
