@@ -14,6 +14,22 @@ import pytest
 from marketdata import update
 from marketdata.providers import norgate as nprov
 from marketdata.providers import yfinance as yprov
+from marketdata.registry import all_symbols
+
+
+def a_registered_equities_symbol() -> str:
+    """Read out of the registry rather than hardcoded.
+
+    An earlier version of these tests named VIX outright. VIX was retired from
+    registry.yaml the next morning and both cases went red -- a fixture drifting
+    from the thing that actually runs, which is the exact failure this module
+    exists to catch. Naming no symbol leaves nothing to drift.
+    """
+    for s in all_symbols():
+        if s.domain == "equities" and s.yahoo:
+            return s.internal
+    raise RuntimeError("registry carries no equities symbol to test with")
+
 
 YF_OK = {"kind": "bars_yahoo", "ok": True, "wrote": 1, "failed": 0}
 NG_OK = {"kind": "bars_futures_norgate", "ok": True, "wrote": 1, "failed": 0,
@@ -43,7 +59,8 @@ def test_a_registered_symbol_is_not_refused(monkeypatch):
     """The guard must not over-fire on the case it exists to protect."""
     monkeypatch.setattr(yprov, "update", lambda *a, **k: YF_OK)
     monkeypatch.setattr(nprov, "update", lambda *a, **k: NG_OK)
-    assert update.main(["--bars", "--domain", "equities", "--symbols", "VIX"]) == 0
+    sym = a_registered_equities_symbol()
+    assert update.main(["--bars", "--domain", "equities", "--symbols", sym]) == 0
 
 
 def test_an_equities_symbol_does_not_fail_the_futures_half(monkeypatch):
@@ -53,7 +70,8 @@ def test_an_equities_symbol_does_not_fail_the_futures_half(monkeypatch):
     refusal would fail a run the other half handled perfectly well."""
     monkeypatch.setattr(yprov, "update", lambda *a, **k: YF_OK)
     monkeypatch.setattr(nprov, "update", lambda *a, **k: NG_OK)
-    assert update.main(["--bars", "--symbols", "VIX"]) == 0
+    sym = a_registered_equities_symbol()
+    assert update.main(["--bars", "--symbols", sym]) == 0
 
 
 def test_no_symbols_means_no_check(monkeypatch):
