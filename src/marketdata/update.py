@@ -143,6 +143,27 @@ def main(argv=None) -> int:
             p.error(f"{flag} modifies the databento ingest. Pass it with "
                     f"--ingest-databento.")
 
+    # Same rule once more, for --symbols. A symbol the registry does not carry
+    # cannot be fetched by anything, and the providers disagreed about what to do
+    # with one: databento refuses it (KeyError, "not in the marketdata registry"),
+    # while yfinance and norgate filtered it out and returned ok=True with wrote=0
+    # -- exit 0, a wrapper's `if not errorlevel 1` reading it as a good run. So
+    # `--symbols VIX` against a registry that no longer carries VIX reported
+    # SUCCESS while fetching nothing, and a symbol retired out of the registry
+    # took its consumers' fetches down silently, months from whoever did it. The
+    # check belongs here rather than in each provider: an unscoped `--bars` runs
+    # every domain, so a futures symbol legitimately resolves to nothing in
+    # yfinance and vice versa, and a per-provider refusal would fail a run the
+    # other half handled fine.
+    if args.symbols:
+        from .registry import REGISTRY
+        unknown = [s for s in args.symbols if s not in REGISTRY]
+        if unknown:
+            p.error("not in the marketdata registry: " + ", ".join(unknown)
+                    + ". Nothing would be fetched for these, so this is refused "
+                      "rather than reported as a run that wrote 0 rows. Check the "
+                      "spelling, or add them to registry.yaml.")
+
     if args.final_cutoff:
         print(f"note: --final-cutoff {args.final_cutoff} is deprecated and ignored. "
               f"The finals gate is data-driven (a newer settled bar than the store "
