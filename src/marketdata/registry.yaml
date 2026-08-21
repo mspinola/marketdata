@@ -33,6 +33,21 @@ Equity Index ETF:
     yahoo: "IWM"
     inception: "2000-05-22"
 
+# The MSCI international indices are the one place a COT market is priced off an ETF
+# rather than its own futures. MFS and MME have ICE futures that Norgate does not carry
+# a continuous series for, so cotmetrics reads the proxy instead. Registered here as
+# ordinary equity ETFs, under their OWN tickers: the proxy relationship is cotmetrics'
+# to know, and encoding it here would put a consumer's modelling choice in the registry.
+MSCI International ETF:
+  EFA:
+    yahoo: "EFA"
+    inception: "2001-08-14"
+    note: "iShares MSCI EAFE. Price proxy for the ICE MSCI EAFE future (COT symbol MFS)."
+  EEM:
+    yahoo: "EEM"
+    inception: "2003-04-07"
+    note: "iShares MSCI Emerging Markets. Price proxy for the ICE MSCI EM future (COT symbol MME)."
+
 Treasury ETF:
   TLT:
     yahoo: "TLT"
