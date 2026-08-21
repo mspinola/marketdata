@@ -12,7 +12,8 @@ hands to its consumers, months after the retirement, looking like a typo.
 import pytest
 
 from marketdata import update
-from marketdata.providers import norgate as nprov, yfinance as yprov
+from marketdata.providers import norgate as nprov
+from marketdata.providers import yfinance as yprov
 
 YF_OK = {"kind": "bars_yahoo", "ok": True, "wrote": 1, "failed": 0}
 NG_OK = {"kind": "bars_futures_norgate", "ok": True, "wrote": 1, "failed": 0,
