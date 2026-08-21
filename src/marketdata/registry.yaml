@@ -70,17 +70,38 @@ Broad Bond ETF:
     yahoo: "AGG"
     inception: "2003-09-22"
 
-# The four CBOE implied-vol indices (VIX, VXN, OVX, GVZ) were removed on 2026-08-21.
-# They were fetchable but nothing in the store's own governance kept them: the workspace
-# notes had recorded them as "deliberately let go" since July while they sat here in the
-# registry, so every unscoped `--bars --domain equities` fetched them back. The prose and
-# the registry disagreed, and the registry is what runs.
+# KEPT DELIBERATELY. These four have been removed twice, on 2026-07-xx and again on
+# 2026-08-21, both times on the belief that nothing used them. Something does:
+# npf/trading_riot maps each to a realized counterpart (VIX->ES, VXN->NQ, OVX->CL,
+# GVZ->GC) for a variance-risk-premium study, and its data.py documents fetching them
+# with `marketdata-update --bars --symbols VIX`.
 #
-# CONSEQUENCE, recorded because it is not visible from here: npf/trading_riot maps all
-# four to a realized counterpart (VIX->ES, VXN->NQ, OVX->CL, GVZ->GC) for a variance
-# risk premium study, and its data.py documents fetching them with
-# `--bars --symbols VIX`. That command now reports "no registry symbols resolve to this
-# provider" and exits 0, writing nothing. Re-add the block below to unblock that work.
+# Both removals were justified by a note kept somewhere else saying they were retired.
+# Neither removal checked the consumer, because the consumer is in another repo and a
+# grep of THIS one comes back clean. That is the trap: absence of a local reference is
+# not evidence of absence of a dependency.
+#
+# So the reason lives here, next to the thing it governs, rather than in a document
+# that can drift out of step with it. If trading_riot is genuinely retired, delete
+# these four AND say so here in the same commit -- do not leave the next reader to
+# rediscover the dependency from a failed fetch.
+Volatility Index:
+  VIX:
+    yahoo: "^VIX"
+    inception: "1990-01-02"
+    note: "CBOE 30-day implied vol index. No corporate actions, so the split/raw tiers are a passthrough. It is an implied-vol series, not a tradable price."
+  VXN:
+    yahoo: "^VXN"
+    inception: "2001-01-23"
+    note: "CBOE Nasdaq-100 implied vol. Implied series, not tradable. Realized counterpart: NQ."
+  OVX:
+    yahoo: "^OVX"
+    inception: "2007-05-10"
+    note: "CBOE crude-oil ETF (USO) implied vol. Implied series, not tradable. Realized counterpart: CL."
+  GVZ:
+    yahoo: "^GVZ"
+    inception: "2008-06-03"
+    note: "CBOE gold ETF (GLD) implied vol. Implied series, not tradable. Realized counterpart: GC."
 
 # ── Futures ───────────────────────────────────────────────────────────────
 # Ported from cotdata's registry (ADR-0007 step 2: bars move here, CFTC
