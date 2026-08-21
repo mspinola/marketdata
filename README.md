@@ -239,7 +239,7 @@ share a `manifest.json`. Both producers do a read-modify-write on it.
 
 ### On the Windows futures producer
 
-That box now runs **two producers**, so it needs **both** store variables set at
+That box now runs **three scheduled producers** across two packages, so it needs **both** store variables set at
 once, pointing at **different roots**. This is new with the futures domain: until
 ADR-0007 moved bars here, `COTDATA_STORE` alone was the whole story.
 
@@ -289,11 +289,39 @@ Norgate holds a **newer settled session than the store already does** (checked
 across `ES`, `CL` and `ZC`, all of which must have advanced). Until then it prints
 which reference is lagging and **exits non-zero**.
 
-Give the task a **restart on failure** in Task Scheduler. That turns "fire at 9pm"
-into "run the moment the Finals land": each retry is one short date comparison that
-exits immediately until they do, and on a weekend or holiday the retries simply
-exhaust, harmlessly. `schtasks` cannot set restart-on-failure, so use PowerShell, as
-in [cotdata's scheduling guide](https://github.com/mspinola/cotdata/blob/main/docs/WINDOWS_SCHEDULING.md).
+Give the task's **trigger a repetition** — fire at 20:55, then repeat every 15 minutes
+for 5 hours. That turns "fire at 9pm" into "run the moment the Finals land": each repeat
+is one short date comparison that defers immediately until they do, and on a weekend or
+holiday the window simply closes, harmlessly.
+
+```bat
+schtasks /Create /TN "marketdata bars" /TR "<DIR>\run-prices.cmd" /SC DAILY /ST 20:55 /RI 15 /DU 0005:00
+```
+
+> [!WARNING]
+> **Not "if the task fails, restart every N minutes."** This page used to recommend that,
+> and it was wrong in production. That setting covers the scheduler failing to *launch* the
+> action — it does **not** fire on a non-zero exit code from your script. A run whose action
+> returns 1 is recorded as event 102, *"Task Scheduler successfully finished"*, and no
+> restart is scheduled.
+>
+> Measured on the reference box, which had `RestartCount 20` / `RestartInterval PT15M` set
+> on the bars task: from 2026-08-12 to 08-15 the action returned exit 1 (a `--require-final`
+> defer) and the task was launched **exactly once each night** — four consecutive nights, no
+> retry, no bars captured. Events 111 and 322–324, the restart and queue events, never
+> appeared at all.
+>
+> The failure stayed invisible because the gate self-heals: a missed night is captured by
+> the next run that finds Norgate ahead of the store, so the data was never permanently
+> wrong, only a day late, and `--check` a week later looked fine.
+
+A repetition fires on schedule regardless of what the previous run returned, which is
+exactly what a poll needs. `schtasks` sets it with `/RI` (interval, minutes) and `/DU`
+(duration, `HHHH:MM`); `/Change` converts an existing task in place. In the GUI it is on the
+**Triggers** tab — *"Repeat task every…"* — not the **Settings** tab, which is where
+restart-on-failure lives. Full detail, including why the duration is picked from when the
+source could plausibly arrive, is in
+[cotdata's scheduling guide](https://github.com/mspinola/cotdata/blob/main/docs/WINDOWS_SCHEDULING.md#polling-with-a-repeating-trigger).
 
 The gate is **opt-in and futures-only**. Without the flag the run is unconditional
 as before; with `--domain equities` it is refused rather than ignored, because
@@ -307,6 +335,49 @@ If the bars task is currently **chained behind cotdata's `run-prices.cmd`** with
 `ERRORLEVEL` guard, cotdata's gate has been protecting this one. That still works;
 the flag makes the task correct on its own, so the chain becomes a convenience
 rather than the only thing standing between the store and an unsettled bar.
+
+### Scheduling the equities half
+
+**Equities get their own task, not a step appended to the futures wrapper.** Three reasons,
+any one of which is sufficient:
+
+1. **The futures wrapper exits early by design.** `run-prices.cmd` carries the
+   `--require-final` exit code straight out, so once the futures half has captured, every
+   later repeat exits at line one. Anything chained behind it is unreachable on those
+   repeats — equities would get exactly one attempt per night, with the repetition trigger
+   above providing no retry for it at all.
+2. **The two halves fail differently.** `--bars --domain equities` reports ok only when
+   `failed == 0`, so one flaky Yahoo symbol fails the whole run. Chained behind the futures
+   fetch, that transient would abort the replica syncs and strand the futures bars written
+   that night on the producer. One vendor's hiccup should not hold the other vendor's good
+   data hostage.
+3. **Yahoo needs no finals gate.** The session's daily bar is available shortly after the
+   16:00 ET close, so this runs at 17:30 ET and is finished — retries included — before the
+   20:55 futures task starts. Both wrappers end by mirroring the same replicas, and two of
+   those running concurrently is a race nobody wants to debug.
+
+```bat
+schtasks /Create /TN "marketdata equities" /TR "<DIR>\run-equities.cmd" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 17:30
+```
+
+**No `--require-final`** — the gate is futures-only and is *refused* here rather than
+ignored (`update.py` exits 2). yfinance publishes no settled-versus-interim distinction, so
+there is nothing to gate on. The protection comes from cadence instead: the provider fetches
+`period="max"` and `write_bars` replaces the whole parquet, so every run restates the full
+history and a provisional bar captured today is overwritten tomorrow. **That self-healing is
+why this task must be daily rather than weekly or monthly** — the store keeps no per-bar
+record of whether a value was provisional, so on a monthly cadence a bad capture would sit
+there unmarked for a month.
+
+**No `--metadata`** either: that fetches *futures* contract specs from Norgate, and the
+futures task already runs it nightly.
+
+**Put the retry inside the wrapper, not on the task** — see the warning above for why Task
+Scheduler's restart-on-failure cannot do it. A repetition trigger is also the wrong shape
+here: with no `--require-final` gate to defer cheaply, every repeat after a success would
+re-fetch every symbol and re-run both replica syncs. A short retry loop around the fetch
+alone is what you want; there is a worked template at
+[cotdata's `docs/examples/windows/run-equities.cmd`](https://github.com/mspinola/cotdata/blob/main/docs/examples/windows/run-equities.cmd).
 
 ## Tests
 

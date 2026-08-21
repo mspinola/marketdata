@@ -185,10 +185,17 @@ ready := norgate_latest_bar_date > store_latest_bar_date
 
 evaluated across a quorum of liquid continuous references (`ES`, `CL`, `ZC`), all
 of which must have advanced, so one lagging reference cannot green-light a partial
-capture. Not ready means defer with a **non-zero exit**, so a scheduler's
-restart-on-failure becomes the retry loop: each retry is a short `price_timeseries`
-window and a date compare, and exits immediately until the Finals land. Exhausting
-the retries on a weekend or holiday is the harmless case.
+capture. Not ready means defer with a **non-zero exit**, so a **repetition on the
+task's trigger** becomes the retry loop: each repeat is a short `price_timeseries`
+window and a date compare, and defers immediately until the Finals land. The window
+closing on a weekend or holiday is the harmless case.
+
+The retry has to be a trigger repetition rather than Task Scheduler's
+*"if the task fails, restart every N minutes"*. That setting fires when the scheduler
+cannot **launch** the action, not when the action exits non-zero — so it never retried
+a defer at all. Measured on the reference box: four consecutive nights (2026-08-12 to
+08-15) of exit 1, launched exactly once each night. The gate's whole design assumes
+something re-runs it; a repetition is the thing that actually does.
 
 This mirrors cotdata's gate deliberately, including its correction. cotdata first
 implemented the check as a **wall-clock cutoff** on
