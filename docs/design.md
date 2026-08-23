@@ -308,7 +308,63 @@ Three consequences worth stating:
 - Storage duplicates for overlapping symbols. Irrelevant at daily resolution, where a full
   SPY history back to 1993 is a few thousand rows.
 
+## Contract regimes
+
+`contract_specs` carries one row per symbol and no effective date. That is right for the
+question it answers, "what is this contract today", and wrong for any consumer that
+multiplies a HISTORICAL position or trade by it. Where an exchange re-denominated a
+contract, dates before the change need the old multiplier.
+
+`contract_regimes.yaml` plus `marketdata.point_value_asof` / `tick_value_asof` are the
+effective-dated companion. Two markets are declared today: **RTY**, where ICE halved the
+Russell multiplier from $100 to $50 effective trade date 2016-12-05 and converted each
+open lot into two, and **LBR**, carried for completeness because cotdata already bridges
+the CME lumber replacement through its own `hist_codes` scale.
+
+Three decisions are worth stating, because each rules out an obvious alternative.
+
+**It is a separate table, not a `Valid_From` column on `contract_specs`.** Adding the
+column would be harmless; adding the ROWS is not. Consumers index that table by `Symbol`
+and npf's `validation/costs.py` does `specs.loc[sym]`, which silently returns a DataFrame
+instead of a Series once a symbol has two rows. That is a wrong answer rather than an
+error, in the repo whose numbers feed a gate verdict. Keeping `contract_specs` at one row
+per symbol makes this change purely additive, so it needs no deprecation path despite the
+package being public and on PyPI.
+
+**It is a packaged file, not a store table.** Every other table under `metadata/` is
+written by a producer from a vendor. This one cannot be: Norgate and databento both
+publish only the current specification, so a store artifact would be a producer writing a
+hand-entered constant, and it would then need mirroring to every replica and a producer
+run to change. A packaged file travels with the version, is byte-identical on the Windows
+producer and every consumer, and resolves with no store configured. `registry.yaml` is
+the precedent, for the reason written at the top of it: a curated fact belongs next to
+the thing it governs, with its justification inline.
+
+**An undeclared symbol falls back to its current spec.** So a caller writes one code path
+for every market and only the declared ones behave differently. The alternative, raising
+or returning NaN for undeclared symbols, would push a branch into every consumer to
+express "nothing re-denominated this", which is the common case.
+
+The file restates each declared symbol's CURRENT multiplier as its last regime, purely so
+that value can be compared against the vendor-refreshed `contract_specs`.
+`tests/test_contract_regimes.py` makes that comparison against the live store, skipping
+when there is none. Without it the file has one silent failure mode and it is the bad
+one: an exchange changes a multiplier again, the vendor picks it up, and this file keeps
+back-dating the superseded value while every lookup still returns a plausible number.
+
 ## Known holes
+
+**The contract-regime list is bounded by what one audit could see.** The two declared
+markets came from an audit of the 47-market cotmetrics universe
+(`cotmetrics/docs/analysis/2026-08-22-effective-dated-contract-multipliers.md`), which used
+two signals and neither is complete. CFTC market names are noisy: 72% of the boundaries
+they produce are exchange-wide relabel dates, and they did not mark the Russell change at
+all. The second signal, a one-week event where every reportable position column scales by
+one factor, only catches an INSTANTANEOUS conversion; a multiplier change handled by
+listing a new contract alongside the old and letting positions migrate over months leaves
+no step. The audit also covered only symbols in that universe, so equities and any futures
+market outside it were never checked. Absence from `contract_regimes.yaml` means nobody
+established a change, not that none happened.
 
 **Capital Gains looks unpopulated.** The column exists but fired zero times across
 TLT, VFINX, PRHSX, and FCNTX, including two funds with 11,735 rows each. Four

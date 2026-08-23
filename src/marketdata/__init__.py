@@ -29,6 +29,14 @@ from .provenance import (
     provenance,
     require_coverage,
 )
+from .regimes import (
+    REGIME_COLUMNS,
+    RegimeError,
+    declared_symbols,
+    point_value_asof,
+    read_contract_regimes,
+    tick_value_asof,
+)
 from .registry import (
     DOMAINS,
     REGISTRY,
@@ -42,9 +50,13 @@ from .registry import (
 # read_metadata is public API rather than an internal reached for from outside:
 # contract specs (point value, tick size) are what turns a futures bar into
 # notional or risk units, so a package that reads bars reads specs too.
+#
+# `read_metadata` answers "what is this contract today" and `point_value_asof` answers
+# "what was it worth on this date". Reach for the second whenever the position or trade
+# being valued is historical: see regimes.py and contract_regimes.yaml.
 from .store import load_manifest, read_metadata, require_schema, schema_version
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "get_bars", "available",
     "provenance", "Provenance",
@@ -54,4 +66,6 @@ __all__ = [
     "symbol", "all_symbols", "by_asset_class", "domain_for", "DOMAINS",
     "REGISTRY", "Symbol",
     "load_manifest", "read_metadata", "schema_version", "require_schema",
+    "read_contract_regimes", "point_value_asof", "tick_value_asof",
+    "declared_symbols", "REGIME_COLUMNS", "RegimeError",
 ]
