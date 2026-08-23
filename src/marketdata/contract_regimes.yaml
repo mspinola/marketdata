@@ -1,0 +1,138 @@
+# Contract regimes: what a contract was worth BEFORE it was worth what it is now.
+#
+# `contract_specs` (metadata/contract_specs.parquet, refreshed by
+# `marketdata-update --metadata`) answers "what is this contract today". It carries one
+# row per symbol and no effective date, which is correct for its question and wrong for
+# any consumer that multiplies a HISTORICAL position or trade by it. Where an exchange
+# re-denominated a contract, every date before the change needs the old multiplier.
+#
+# This file is the effective-dated companion. It is deliberately NOT a column on
+# contract_specs: adding rows there would give a symbol two entries, and consumers index
+# that table by Symbol (npf's validation/costs.py does `specs.loc[sym]`), so a second row
+# turns a Series into a DataFrame and produces a wrong answer rather than an error.
+#
+# WHY THIS IS A PACKAGED FILE AND NOT A STORE TABLE
+#
+# Every other table under metadata/ is written by a producer from a vendor. This one
+# cannot be: Norgate and databento both publish only the CURRENT specification, so a
+# store artifact would be a producer writing a hand-entered constant, and it would then
+# have to be mirrored to every replica and re-run to change. A packaged file travels with
+# the version, is byte-identical on the Windows producer and every consumer, and is
+# readable with no store configured at all. registry.yaml is the precedent, and the
+# reason it is the precedent is written at the top of it.
+#
+# SCHEMA
+#
+#   <SYMBOL>:
+#     - valid_from: "YYYY-MM-DD" | null   first date the regime applied, exchange local.
+#                                         null on the FIRST regime only, meaning "for all
+#                                         history before the next one". An explicit date
+#                                         on the first regime BOUNDS the series: earlier
+#                                         dates resolve to NaN rather than to a guess.
+#       point_value: <float>              USD per 1.00 of the quoted price.
+#       tick_value:  <float> | null       USD per minimum tick. null where unverified.
+#       name:        <str>                what the contract was called then.
+#       source:      <str>                a citation a reader can check WITHOUT trusting
+#                                         this file. Required on every row: a multiplier
+#                                         with no citation is indistinguishable from a
+#                                         typo.
+#
+# INVARIANTS, both enforced by tests/test_contract_regimes.py
+#
+#  1. Every symbol lists ALL of its regimes, including the current one, sorted by
+#     valid_from. `point_value_asof` therefore never has to combine this file with
+#     contract_specs for a declared symbol.
+#  2. The LAST regime here must equal contract_specs' current Point Value and Tick Value.
+#     That is a tripwire: if an exchange changes a multiplier again and the vendor picks
+#     it up, the test fails and names the symbol, rather than this file silently going
+#     stale and back-dating the new value over the old history.
+#
+# HOW TO ADD A REGIME
+#
+# Add the NEW regime as a row with its valid_from, and leave the old rows alone.
+#
+# Symbols absent from this file have had one regime for their whole stored history, as
+# far as anyone has established. That is an assertion about what was checked, not a
+# guarantee: see 'Contract regimes' in docs/design.md for what the audit behind
+# this file could and could not see.
+
+RTY:
+  # ICE Futures U.S. halved the multiplier on every Russell index future, effective with
+  # the start of trading for trade date Monday 2016-12-05, and converted each open lot
+  # into two lots. The CFTC did NOT rename the market that week, so nothing in the COT
+  # data marks it; the rename in that series is 2017-08-15 and records the unrelated
+  # migration of the contract from ICE back to CME. Applying today's $50 to the whole
+  # history understates 59% of the Russell's priced weeks by exactly 2x.
+  #
+  # The contract was $100 on CME from its 2002 listing, moved to ICE in 2008 at $100,
+  # changed to $50 on ICE in 2016, and moved back to CME in 2017 still at $50. Both
+  # venue migrations transferred positions about 1:1 and neither changed the multiplier,
+  # so they are not regime boundaries and are not listed.
+  #
+  # The first regime is unbounded rather than dated at the contract's listing: what is
+  # established is that $100 was in force immediately before the change and that nothing
+  # re-denominated it across the whole span this stack can serve. The listing date itself
+  # was not checked, so asserting one would be decoration.
+  - valid_from: null
+    point_value: 100.0
+    tick_value: 10.0
+    name: "Russell 2000 index future, $100 multiplier (CME 2002-2008, ICE 2008-2016)"
+    source: >-
+      ICE FAQ 2016-10-31, 'Russell Index Contracts Price Multiplier Change'
+      (https://www.ice.com/publicdocs/futures_us/Russell_Multiplier_Change_FAQ.pdf).
+      It gives both prior values in the course of announcing the change: the multiplier
+      it was changing FROM ($100 per index point) and the tick it was changing from
+      ($10.00 per contract).
+  - valid_from: "2016-12-05"
+    point_value: 50.0
+    tick_value: 5.0
+    name: "E-mini Russell 2000, $50 multiplier"
+    source: >-
+      ICE FAQ 2016-10-31, same document: the multiplier 'will change to $50 per index
+      point, from the current $100 multiplier', effective with the start of trading for
+      trade date Monday 2016-12-05, with each open lot converted to two lots and the
+      minimum tick becoming $5.00 per contract. Independently confirmed in the cotdata
+      store: open interest 355,514 -> 691,904 on COT week 2016-12-06, ratio 1.946, with
+      the non-reportable buckets moving only 1.22-1.28x because the FAQ left the
+      reporting threshold at 200 lots.
+
+LBR:
+  # CME replaced Random Length Lumber (110,000 board feet) with Lumber (27,500 bf),
+  # listing the new contract 2022-08-08 and running the old one down to 2023-05.
+  #
+  # Listed for completeness rather than because it is broken. The CFTC gave the two
+  # contracts DIFFERENT market codes (058643 and 058644), so cotdata bridges them in its
+  # own registry with `hist_codes: [["058643", 4.0]]` and rescales predecessor contract
+  # counts into current-contract units before any consumer sees them. A consumer reading
+  # cotdata therefore already receives 27,500-bf-equivalent counts and must NOT also
+  # apply the 110.0 below: that would apply the conversion twice. The rows exist so a
+  # consumer working from a different positioning source, or from per-contract trade
+  # records, can reach the same answer.
+  #
+  # Norgate's &LBR series begins at the new contract's 2022-08 listing, so nothing in
+  # this package currently reads a price on the 110.0 regime at all.
+  #
+  # The first regime is DATED rather than unbounded, and that is the point of the
+  # distinction. Code 058643's CFTC names run 'RANDOM LENGTH LUMBER' (1995-09-26),
+  # 'RANDOM LENGTH LUMBER-NEW' (1995-12-12) and 'RANDOM LENGTH LUMBER-80/110000'
+  # (1999-12-21), which suggest the contract was resized before settling at 110,000 bf.
+  # Those earlier sizes and their effective dates could not be established from exchange
+  # records, so dates before 1995-12-12 resolve to NaN. A gap is visible; a guess is not.
+  - valid_from: "1995-12-12"
+    point_value: 110.0
+    tick_value: null
+    name: "Random Length Lumber, 110,000 board feet"
+    source: >-
+      CME Random Length Lumber contract specification: 110,000 board feet, quoted in
+      $/1,000 bf, hence $110 per point. 110,000 / 27,500 = 4.0, which is the scale
+      cotdata's registry already carries for the predecessor code. valid_from is INFERRED
+      from the first COT week under the 'RANDOM LENGTH LUMBER-NEW' name rather than taken
+      from an exchange notice, so treat it as approximate. tick_value is null because the
+      old contract's minimum tick was not verified.
+  - valid_from: "2022-08-08"
+    point_value: 27.5
+    tick_value: 13.75
+    name: "Lumber, 27,500 board feet"
+    source: >-
+      CME Lumber futures contract specification, 27,500 board feet quoted in $/1,000 bf:
+      https://www.cmegroup.com/markets/agriculture/lumber-and-softs/lumber/specs
