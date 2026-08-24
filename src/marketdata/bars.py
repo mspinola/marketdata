@@ -14,7 +14,14 @@ from typing import Optional
 import pandas as pd
 
 from . import store
-from .adjust import adjust, check_tier, ratio_adjust, stored_tiers_for, tiers_for
+from .adjust import (
+    adjust,
+    backadj_asof,
+    check_tier,
+    ratio_adjust,
+    stored_tiers_for,
+    tiers_for,
+)
 from .registry import REGISTRY, default_price_source, domain_for, resolve_source
 
 _COLS = ("Open", "High", "Low", "Close", "Volume")
@@ -32,6 +39,7 @@ def default_source_for(symbol: str) -> str:
 def get_bars(symbol: str, adjustment: Optional[str] = None, *,
              source: Optional[str] = None, domain: Optional[str] = None,
              start: Optional[str] = None, end: Optional[str] = None,
+             asof: Optional[str] = None,
              volume: str = "front",
              include_capital_gains: bool = False) -> pd.DataFrame:
     """Daily bars for `symbol`, adjusted to `adjustment`.
@@ -74,6 +82,19 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
     crowdmon, whose `futures/volume.py` refuses anything but `front` for that
     reason; carried here because the naming will mislead the next reader too.
 
+    `asof` returns the series AS IT STOOD on that date (futures only), which is
+    not the same thing as `end`. `end` truncates today's series; `asof` also
+    re-anchors it to the contract that was front on that date. Additive
+    back-adjustment restates all prior history on every roll, so the two differ
+    by the cumulative spread of every roll since. Use it to ask whether a signal
+    a backtest sees was actually visible at the time. It matters only for
+    RATIO-based logic: measured on lean hogs against a June-2015 as-of, 25.1% of
+    "20-day ROC above 10%" days and 21.3% of "5% above the 200-day mean" days
+    differ from today's series, while a 50/200 crossover and a 20-day breakout
+    differ on zero days out of 9,237, because a constant offset cancels out of a
+    comparison between two points on one series. `unadj` is as-traded and does
+    not restate, so an `asof` read of it is a plain truncation.
+
     `domain` is resolved from the registry and rarely passed. `source` pins the
     vendor. Omit it and the registry resolves one for this deployment. Pass it
     explicitly to compare vendors on the same symbol, which is the point of
@@ -97,8 +118,20 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
             f"highest-volume expiries) and {symbol!r} is in domain {dom!r}.")
 
     if dom == "futures":
-        out = _futures_bars(symbol, src, adjustment)
+        out = _futures_bars(symbol, src, adjustment, asof=asof)
     else:
+        if asof is not None:
+            raise NotImplementedError(
+                "asof= is implemented for the futures domain only, and "
+                f"{symbol!r} is in domain {dom!r}. The equity vintage is a "
+                "different derivation, not the same one with a different "
+                "date: stored yfinance OHLC is already split-adjusted using "
+                "every split INCLUDING those after the as-of date, so a "
+                "vintage has to un-apply those, and the total-return tier "
+                "has to drop dividends paid after it. Refusing rather than "
+                "ignoring the argument: silently returning today's series "
+                "for a point-in-time request is the failure this parameter "
+                "exists to prevent.")
         out = _equity_bars(symbol, dom, src, adjustment,
                            include_capital_gains=include_capital_gains)
     if out.empty:
@@ -167,7 +200,8 @@ def _equity_bars(symbol: str, dom: str, src: str, tier: str, *,
                   include_capital_gains=include_capital_gains)
 
 
-def _futures_bars(symbol: str, src: str, tier: str) -> pd.DataFrame:
+def _futures_bars(symbol: str, src: str, tier: str,
+                  asof: Optional[str] = None) -> pd.DataFrame:
     """Two stored frames; `propadj` derived from both.
 
     The half-stored case gets its own message rather than an empty frame. A
@@ -177,12 +211,31 @@ def _futures_bars(symbol: str, src: str, tier: str) -> pd.DataFrame:
     0.47x on gold, and the second of those passes every implausibility screen a
     spot check would apply.
     """
-    if tier in stored_tiers_for("futures"):
+    if tier == "unadj":
         df = store.read_bars(symbol, "futures", src, tier)
         if df.empty:
             _missing(symbol, "futures", src, tier)
             return df
-        return _normalized(df)
+        out = _normalized(df)
+        # Unadjusted prices are as-traded, so they do not restate. A vintage of
+        # them is the same series truncated, and saying so beats special-casing.
+        return out if asof is None else out.loc[out.index <= pd.Timestamp(asof)]
+
+    if tier == "backadj":
+        df = store.read_bars(symbol, "futures", src, tier)
+        if df.empty:
+            _missing(symbol, "futures", src, tier)
+            return df
+        out = _normalized(df)
+        if asof is None:
+            return out
+        unadj = store.read_bars(symbol, "futures", src, "unadj")
+        if unadj.empty:
+            raise FileNotFoundError(
+                f"{symbol}: an asof= read of 'backadj' needs 'unadj' too (the "
+                f"vintage offset is the difference between them on the as-of "
+                f"date), and 'unadj' is not in the store under source {src!r}.")
+        return backadj_asof(_normalized(unadj), out, asof)
 
     unadj = store.read_bars(symbol, "futures", src, "unadj")
     backadj = store.read_bars(symbol, "futures", src, "backadj")
@@ -196,7 +249,13 @@ def _futures_bars(symbol: str, src: str, tier: str) -> pd.DataFrame:
             f"only {have!r} is in the store under source {src!r} ({missing!r} is "
             f"missing). Re-run the futures producer for this symbol — it writes "
             f"both tiers or neither, so a half-written symbol means a failed run.")
-    return ratio_adjust(_normalized(unadj), _normalized(backadj))
+    u, b = _normalized(unadj), _normalized(backadj)
+    if asof is not None:
+        # Re-anchor FIRST, then ratio-adjust the vintage. Doing it the other way
+        # round would scale segments by roll ratios that had not happened yet.
+        b = backadj_asof(u, b, asof)
+        u = u.loc[u.index <= pd.Timestamp(asof)]
+    return ratio_adjust(u, b)
 
 
 def _symbol_of(stem: str, dom: str) -> str:

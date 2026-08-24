@@ -193,6 +193,83 @@ half-stored symbol is worth being loud about: additive back-adjusted percent
 volatility comes out ~200x too high for soybeans and 0.47x for gold, and 0.47x
 passes every implausibility screen a spot check would apply.
 
+## What a futures bar carries
+
+Every stored futures frame, both tiers, carries these columns. Three of them name
+the actual expiries behind the continuous series, which is the only per-contract
+information the store holds.
+
+| Column | What it is |
+|---|---|
+| `Open` `High` `Low` `Close` | settlement-close OHLC at the requested tier |
+| `Volume` | front-month volume, or the reconstructed series if `volume="reconstructed"` |
+| `Open Interest` | front-month open interest |
+| `Delivery Month` | the expiry that is front on this bar, as `YYYYMM`. Changes exactly at a roll, which is what makes roll detection semantic rather than a guess at the offset |
+| `FirstContract` `SecondContract` | the two highest-volume expiries trading that day, by Norgate symbol (`HE-2026V`) |
+| `FirstVolume` `SecondVolume` | their volumes |
+| `Volume_Reconstructed` | `FirstVolume + SecondVolume`, or front-month volume where individual contracts were unavailable |
+| `Volume_Source` | `reconstructed` or `raw`, so the fall-back rows can be excluded |
+
+**There is no per-expiry OHLC in the store, and that is a storage decision rather
+than a vendor limitation.** The producer enumerates every individual contract and
+calls `norgatedata.price_timeseries` on each one, which returns full bars; it then
+keeps `Date`, `Volume` and `Symbol` and discards the rest
+(`providers/norgate.py`). So the contract NAMES are stored and their PRICES are
+not. Anything needing a calendar spread, a same-delivery-month seasonal study, or
+a check of whether a continuous signal survives on the contract you would actually
+trade is blocked on that selection, not on the subscription.
+
+## Point-in-time reads: `asof=`
+
+```python
+get_bars("HE", "propadj", asof="2015-06-30")   # the series as it stood that day
+get_bars("HE", "propadj", end="2015-06-30")    # today's series, truncated
+```
+
+Reproducing the table below:
+
+```python
+import marketdata
+a = marketdata.get_bars("HE", "backadj", asof="2015-06-30")["Close"]
+e = marketdata.get_bars("HE", "backadj", end="2015-06-30")["Close"].reindex(a.index)
+roc = lambda c: c.pct_change(20) > 0.10
+x, y = roc(a), roc(e)
+m = x.notna() & y.notna()
+print(int((x[m] != y[m]).sum()), "of", int(m.sum()))   # 2314 of 9237
+```
+
+These are different, and the difference is not small. Additive back-adjustment
+re-anchors to whatever contract is front NOW, so every past price shifts on every
+roll. `end=` truncates today's restated series; `asof=` also removes the
+cumulative spread of every roll since, returning the prices that were actually on
+a screen that day. For HE at a June-2015 as-of, the two differ by a constant
+43.925.
+
+It matters only for RATIO-based logic, and there it matters a lot:
+
+| signal on HE, today's series vs the June-2015 vintage | days differing |
+|---|---|
+| 50/200 moving-average cross | 0 of 9,237 |
+| 20-day breakout | 0 of 9,237 |
+| more than 5% above the 200-day mean | 1,969 (21.3%) |
+| 20-day ROC above 10% | 2,314 (25.1%) |
+
+A constant offset cancels out of a comparison between two points on one series and
+does not cancel out of a ratio between them. So a moving-average system is immune
+to this and a percent-threshold system is not, and a quarter of the ROC signals a
+backtest sees on hogs were not visible when they supposedly fired.
+
+The vintage is exact, not approximate: the offset is piecewise constant and steps
+only at rolls (measured: zero non-roll movement across 11,714 HE bars), so
+re-anchoring is one subtraction. `unadj` does not restate at all, so an `asof`
+read of it is a plain truncation.
+
+**Futures only.** On equities it raises. The equity vintage is a different
+derivation rather than the same one with a different date, because stored yfinance
+OHLC is already split-adjusted using every split including those after the as-of
+date. Refusing beats ignoring the argument: silently returning today's series for
+a point-in-time request is the failure the parameter exists to prevent.
+
 ## Store layout
 
 ```
