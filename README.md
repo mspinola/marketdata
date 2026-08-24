@@ -17,6 +17,35 @@ each vendor's behaviour that was verified rather than assumed.
 Futures arrived with ADR-0007, which makes cotdata CFTC positioning only and
 moves every bar here.
 
+```mermaid
+flowchart LR
+  V1["yfinance<br/>equities, ETFs"] --> P["marketdata-update<br/>producer"]
+  V2["Norgate<br/>futures, Windows only"] --> P
+  V3["databento<br/>futures, any OS"] --> P
+  P --> ST[("MARKETDATA_STORE<br/>parquet, one file per<br/>symbol and stored tier")]
+  ST --> G["get_bars<br/>consumer"]
+  G --> C1["a signal"]
+  G --> C2["a backtest"]
+  G --> C3["a study"]
+```
+
+Producers write, consumers only read, and reads never touch the network. The
+store is the seam: everything above it is vendor-specific and runs on whichever
+box can reach that vendor, everything below it is the same on every machine.
+
+## Contents
+
+| | |
+|---|---|
+| [Install](#install) · [Use](#use) | getting bars out |
+| [Two domains, two adjustment axes](#two-domains-two-adjustment-axes) | the core model, **start here** |
+| [Equity tiers](#the-three-equity-adjustment-tiers) · [Futures tiers](#the-three-futures-adjustment-tiers) | which series answers which question |
+| [What a futures bar carries](#what-a-futures-bar-carries) | the columns, including the per-expiry ones |
+| [Point-in-time reads](#point-in-time-reads-asof) | `asof=`, and why it is not `end=` |
+| [Store layout](#store-layout) · [Environment](#environment) | where things live |
+| [The Windows futures producer](#on-the-windows-futures-producer) | scheduling, the finals gate, the equities half |
+| [Tests](#tests) · [Survivorship](#survivorship) · [Not built yet](#not-built-yet) | limits and caveats |
+
 ## Install
 
 ```bash
@@ -154,6 +183,32 @@ alongside the bars. Futures cannot: Norgate's back-adjustment is roll splicing i
 performed itself, and the stitched calendar spread at each roll appears in no
 other series, so `backadj` and `unadj` are two separate stored facts.
 
+```mermaid
+flowchart LR
+  subgraph eq["EQUITIES: one stored frame"]
+    A["SPY.parquet<br/>bars + dated actions"]
+    A --> A1["split"]
+    A --> A2["raw"]
+    A --> A3["total"]
+  end
+  subgraph fu["FUTURES: two stored frames"]
+    B["ES_unadj.parquet"]
+    C["ES_backadj.parquet"]
+    B --> B1["unadj"]
+    C --> C1["backadj"]
+    B --> D1["propadj"]
+    C --> D1
+  end
+```
+
+Read the arrows as "can be computed from". The asymmetry is the whole reason
+futures grew a tier component in the store path: one arrow into `split`, `raw`
+and `total` because a dividend is a dated event you can re-apply at will, but
+**two** arrows into `propadj` because a roll spread is not recoverable from
+either stored series alone. That is why the futures producer writes both tiers or
+fails the symbol, and why a read that finds one raises instead of returning
+empty.
+
 ## The three equity adjustment tiers
 
 The store holds one frame per equity symbol exactly as the vendor serves it, plus
@@ -178,6 +233,33 @@ the price series and **+132.3%** on total return.
 | `backadj` (default) | additive back-adjustment, as Norgate computes it | signals and stops. Preserves absolute daily price *changes* |
 | `unadj` | raw front-month, real spread gaps at each roll | absolute price level, point-value sizing |
 | `propadj` | ratio back-adjustment, derived from the two above | volatility and any percent return |
+
+One real roll makes the difference concrete. Lean hogs went from the April to the
+June contract over the weekend of 11 to 14 April 2025:
+
+```text
+                                        Fri 11 Apr   Mon 14 Apr        the day's move
+  front contract                            202504       202506
+  unadj      as traded                       85.43        95.12    +9.70    +11.35%
+  backadj    spread removed, SHIFTED         76.00        77.80    +1.80     +2.37%
+  propadj    spread removed, SCALED          77.24        78.73    +1.49     +1.93%
+```
+
+The `unadj` row is the trap: an eleven percent overnight move that nobody made,
+because it is the April/June calendar spread rather than a price change. Both
+adjusted rows remove it, and they differ in HOW. `backadj` subtracts the spread,
+which keeps the point move honest and drags the level away from anything
+tradeable. `propadj` divides it out, which keeps the percentage honest and
+rescales the level instead.
+
+The three disagree only on the 2.7% of bars that are roll days. On the other
+97.3%, measured across HE's full history:
+
+- `propadj` percent returns are **identical** to as-traded, to 6e-8, which is
+  float32 storage precision. Ratio adjustment scales a segment by one constant,
+  and a constant cancels out of a ratio.
+- `backadj` percent returns are off by a **median of 0.894 percentage points per
+  day**, because the level it divides by is not a price.
 
 `propadj` is not an optional refinement. Additive adjustment accumulates roll
 gaps downward, and across the cotdata store **52.3% of ZS's back-adjusted closes
@@ -316,6 +398,25 @@ share a `manifest.json`. Both producers do a read-modify-write on it.
 
 ### On the Windows futures producer
 
+```mermaid
+flowchart TB
+  T1["equities task<br/>weekdays 17:30 ET<br/>no repetition"] --> W1["run-equities.cmd<br/>domain equities<br/>retry loop inside the .cmd"]
+  T2["futures task<br/>daily 20:55<br/>repeat every 15 min for 5 h"] --> W2["run-prices.cmd<br/>domain futures, finals gate<br/>each repeat is one cheap check"]
+  W1 --> S[("MARKETDATA_STORE")]
+  W2 --> S
+  S --> R1["Mac replica"]
+  S --> R2["VPS replica"]
+```
+
+Two tasks, not one, and the separation is load-bearing rather than tidy: see
+[Scheduling the equities half](#scheduling-the-equities-half) for the three
+independent reasons. Note where the retry lives in each. The futures half retries
+via a **repeating trigger**, because its gate can defer cheaply and fall through;
+the equities half retries **inside its wrapper**, because it has no cheap defer
+to fall through to and a repetition would re-fetch every symbol and re-run both
+replica syncs after a success.
+
+
 That box now runs **three scheduled producers** across two packages, so it needs **both** store variables set at
 once, pointing at **different roots**. This is new with the futures domain: until
 ADR-0007 moved bars here, `COTDATA_STORE` alone was the whole story.
@@ -353,6 +454,22 @@ The only marketdata-specific pieces are the `norgate` extra in **Install** above
 the two variables here, and the finals gate below.
 
 ### Waiting for Norgate's Finals
+
+```mermaid
+flowchart TD
+  A["trigger fires: 20:55, then every 15 min for 5 h"] --> B{"does Norgate hold a newer settled<br/>session than the store?<br/>ES, CL and ZC must all have advanced"}
+  B -->|"not yet"| C["name the lagging reference<br/>EXIT NON-ZERO"]
+  C --> A
+  B -->|"yes"| D["fetch, write the store, sync replicas<br/>EXIT ZERO"]
+  D --> E["every later repeat finds the store<br/>already current and defers<br/>EXIT NON-ZERO"]
+```
+
+> [!IMPORTANT]
+> **A healthy night ENDS on a non-zero exit.** The capture happens on one repeat
+> and every repeat after it defers, so the task's Last Result is the defer, not
+> the capture. A deferred run and a genuinely failed run look identical from the
+> scheduler. **Judge a nightly run by the store, never by Last Result.**
+
 
 Schedule the nightly futures run with `--require-final`:
 
