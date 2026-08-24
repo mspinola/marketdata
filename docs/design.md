@@ -361,6 +361,27 @@ back-dating the superseded value while every lookup still returns a plausible nu
 
 ## Known holes
 
+**No per-expiry OHLC, and it is a selection rather than a vendor limit.** The
+store holds continuous series only. That is expected; what is not obvious is that
+the individual-contract prices are already being downloaded. `_reconstruct_volume`
+enumerates every contract matching the market's base symbol, calls
+`norgatedata.price_timeseries` on each in a thread pool, and then selects
+`["Date", "Volume", "Symbol"]` from frames that carry full OHLCV. The fetch, the
+threading and the contract enumeration all work today; only the column selection
+stands between the store and a per-expiry price history.
+
+The consequence is that `FirstContract` and `SecondContract` name the expiries on
+every bar while nothing carries their prices, so a consumer can see WHICH contract
+was trading and not what it traded at. Anything needing a calendar spread (a
+futures-roll book), a same-delivery-month seasonal study, or a check of whether a
+continuous signal survives on the contract one would actually trade is blocked
+here. Persisting it is a schema decision with a real cost (roughly two orders of
+magnitude more rows than the continuous series) and has not been made.
+
+This is the same shape as the reconstruction-columns defect recorded above, one
+level deeper: there, the producer wrote a column nothing served. Here the producer
+fetches data it does not even write, and nothing reports that it was discarded.
+
 **The contract-regime list is bounded by what one audit could see.** The two declared
 markets came from an audit of the 47-market cotmetrics universe
 (`cotmetrics/docs/analysis/2026-08-22-effective-dated-contract-multipliers.md`), which used
