@@ -82,6 +82,16 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
     crowdmon, whose `futures/volume.py` refuses anything but `front` for that
     reason; carried here because the naming will mislead the next reader too.
 
+    **`Open Interest` is whole-market too, and its label has misled twice.** It is
+    Norgate's exchange-collected figure, not a front-month one: against the CFTC's
+    independently collected clearing-member total on the report Tuesday the median
+    ratio is 1.0000 with a zero interquartile range, across the whole npf universe
+    (41 of 41 markets in 0.9999-1.0000) and on a 14-market spot check here. Two
+    collection paths agreeing to four decimals is the whole-market signature; a
+    front-month series would be a fraction. Vendor-specific: the databento producer
+    reads OI from the `.n.0` continuous contract's own statistics, so ITS column is
+    that contract's rather than the market's.
+
     `asof` returns the series AS IT STOOD on that date (futures only), which is
     not the same thing as `end`. `end` truncates today's series; `asof` also
     re-anchors it to the contract that was front on that date. Additive
@@ -172,9 +182,9 @@ def _reconstructed_volume(df: pd.DataFrame) -> pd.DataFrame:
     The producer already writes `Volume_Reconstructed == Volume` on rows it could
     not reconstruct, so reading the column is fall-back-safe where it exists. The
     guards are for a store written before reconstruction, or a stray NaN: both
-    degrade to front-month volume and SAY SO in `Volume_Source`, because a
-    consumer comparing volume across symbols has to be able to exclude the rows
-    that are not really reconstructed.
+    degrade to the stored whole-market `Volume` and SAY SO in `Volume_Source`,
+    because a consumer comparing volume across symbols has to be able to exclude
+    the rows that are not really reconstructed.
     """
     out = df.copy()
     if "Volume_Reconstructed" in out.columns:
@@ -184,7 +194,8 @@ def _reconstructed_volume(df: pd.DataFrame) -> pd.DataFrame:
             out["Volume_Source"] = "reconstructed"
         out.loc[rec.isna(), "Volume_Source"] = "raw"
     else:
-        # Store predates reconstruction, so every row is front-month.
+        # Store predates reconstruction, so every row carries the stored
+        # whole-market `Volume`.
         out["Volume_Source"] = "raw"
     return out
 
