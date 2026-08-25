@@ -265,8 +265,11 @@ def _reconstruct_volume(internal_symbol: str, continuous_df: pd.DataFrame,
     for col in ("FirstContract", "SecondContract"):
         res.loc[common, col] = rec.loc[common, col]
 
-    # Per-ROW fall-back to front-month, flagged, so a consumer can tell which
-    # rows are true market volume and which are the front month standing in.
+    # Per-ROW fall-back to the stored `Volume`, flagged, so a consumer can tell
+    # which rows really are the two-expiry sum and which are the whole-curve
+    # `Volume` standing in. Note the direction: `Volume` is the WIDER series (it
+    # spans the curve), so a fall-back row overstates the reconstruction rather
+    # than understating it.
     mask = res["Volume_Reconstructed"].isna()
     res.loc[mask, "Volume_Reconstructed"] = res.loc[mask, "Volume"]
     res.loc[mask, "Volume_Source"] = "raw"

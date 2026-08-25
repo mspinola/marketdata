@@ -284,13 +284,49 @@ information the store holds.
 | Column | What it is |
 |---|---|
 | `Open` `High` `Low` `Close` | settlement-close OHLC at the requested tier |
-| `Volume` | front-month volume, or the reconstructed series if `volume="reconstructed"` |
-| `Open Interest` | front-month open interest |
+| `Volume` | whole-market volume across the curve, as Norgate reports it, or the two-expiry series if `volume="reconstructed"`. The parameter names invert: see below |
+| `Open Interest` | whole-market open interest, NOT front-month. Norgate's exchange-collected figure, and it agrees with the CFTC's independently collected clearing-member total to four decimal places |
 | `Delivery Month` | the expiry that is front on this bar, as `YYYYMM`. Changes exactly at a roll, which is what makes roll detection semantic rather than a guess at the offset |
 | `FirstContract` `SecondContract` | the two highest-volume expiries trading that day, by Norgate symbol (`HE-2026V`) |
 | `FirstVolume` `SecondVolume` | their volumes |
-| `Volume_Reconstructed` | `FirstVolume + SecondVolume`, or front-month volume where individual contracts were unavailable |
+| `Volume_Reconstructed` | `FirstVolume + SecondVolume`, or the plain `Volume` series where individual contracts were unavailable |
 | `Volume_Source` | `reconstructed` or `raw`, so the fall-back rows can be excluded |
+
+**Both count columns are whole-market, and both names point the other way.**
+`volume="front"` and the `Open Interest` label read as front-month and neither is:
+`front` spans the whole curve, while `reconstructed` sounds fuller and is
+`FirstVolume + SecondVolume`, exactly two expiries. Measured on the current store,
+median of `reconstructed / front` over the last 1,500 bars: **0.55 in NG, 0.59 in
+CL, 0.67 in HE, 0.77 in ZC**, so the narrower series understates most in the
+markets with the deepest curves. It reaches 0.97 in the metals (GC, SI) and 1.00
+in ES, where the curve is effectively two contracts anyway.
+
+Open interest is settled by an outside check rather than by inference. Norgate
+collects it from the exchange and the CFTC collects its own from clearing members,
+so the two are independent measurements of the same quantity, and on the COT
+report Tuesday they agree: **median ratio 1.0000 on 14 of 14 spot-checked
+markets**, over ~24,000 pairs, with a zero interquartile range on 12 of the 14 (6E
+is the loosest at an IQR of 0.0045, PA at 0.0001). Two collection paths cannot
+agree that precisely on anything but the whole market. Front-month would be a
+fraction. This has now been measured three times, most recently across the full
+41-market npf universe, where the per-market median ratio spans 0.9999 to 1.0000
+on 41 of 41; see `cotdata/docs/design/reading-the-store.md` §4 for the first of
+them.
+
+```python
+import marketdata, cotdata, pandas as pd
+
+oi = marketdata.get_bars("CL", "unadj")["Open Interest"].dropna()
+cftc = cotdata.get_cot("CL")["Open_Interest_All"].dropna()
+cftc.index = pd.to_datetime(cftc.index)
+idx = oi.index.intersection(cftc.index)
+print(len(idx), (oi[idx] / cftc[idx]).median())        # 1926 1.0
+```
+
+The whole-market reading is a fact about the **Norgate** producer, which is the one
+that writes this store. The databento producer takes open interest from the `.n.0`
+continuous contract's own statistics (`stat_type` 9), so its `Open Interest` is that
+contract's, not the market's. Do not carry the agreement above across vendors.
 
 **There is no per-expiry OHLC in the store, and that is a storage decision rather
 than a vendor limitation.** The producer enumerates every individual contract and
