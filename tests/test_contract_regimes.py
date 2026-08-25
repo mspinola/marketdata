@@ -7,6 +7,8 @@ failure mode, and it is the bad one: an exchange changes a multiplier again, the
 picks it up, and this file keeps back-dating the superseded value over the new history
 while every lookup still returns a plausible number.
 """
+import os
+
 import pandas as pd
 import pytest
 import yaml
@@ -217,9 +219,20 @@ def test_the_tripwire_fires_when_the_vendor_moves_under_the_file(tmp_store):
 def test_live_store_agrees_with_the_last_declared_regime(field, column):
     """The real tripwire, against whatever `MARKETDATA_STORE` currently holds.
 
-    Skipped rather than failed when the store has no specs, because CI has no store and
-    a red suite there would say nothing about the regime file.
+    Skipped rather than failed when there is no store to check, because CI has no store
+    and a red suite there would say nothing about the regime file.
+
+    **The guard needs both arms, and the env one has to come first.** `read_metadata`
+    resolves the store root, which RAISES by design when the variable is unset, so a
+    guard that only asked whether the specs were empty never got to run in a plain
+    shell: the skip was written and what fired was a `RuntimeError` two frames down,
+    which reads like a real breakage on an untouched tree rather than a missing
+    variable. CI sets the variable to an empty directory, so it is the second arm that
+    fires there and the first arm is invisible to CI by construction. Same shape as the
+    npf skip guards that keyed on one store after the price read moved to another.
     """
+    if not os.environ.get("MARKETDATA_STORE", "").strip():
+        pytest.skip("MARKETDATA_STORE is not set: no live store to check regimes against")
     specs = store.read_metadata()
     if specs.empty or "Symbol" not in specs.columns:
         pytest.skip("no contract_specs in MARKETDATA_STORE")
@@ -235,3 +248,23 @@ def test_live_store_agrees_with_the_last_declared_regime(field, column):
             f"contract_regimes.yaml says {declared}. Either the exchange changed the "
             f"contract again (add a regime) or a regime is wrong. Do NOT edit the last "
             f"regime to match without checking which one moved.")
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_the_live_tripwire_skips_by_name_when_the_store_is_unset(monkeypatch, value):
+    """The guard above, exercised where it can fail. Same reason as the tripwire itself:
+    a guard that has never fired is indistinguishable from one that is not wired in.
+
+    Asserting on the skip REASON, not merely that a skip happened, is the point. The
+    failure this replaces was a `RuntimeError` from `config.store_root` that named the
+    variable perfectly well and still read as a broken tree, because it arrived as an
+    error rather than as a skip. A blank value is the same mistake as an unset one, so
+    it has to reach the same skip (`store_root` strips before checking, and so does the
+    guard).
+    """
+    if value is None:
+        monkeypatch.delenv("MARKETDATA_STORE", raising=False)
+    else:
+        monkeypatch.setenv("MARKETDATA_STORE", value)
+    with pytest.raises(pytest.skip.Exception, match="MARKETDATA_STORE is not set"):
+        test_live_store_agrees_with_the_last_declared_regime("Point Value", "Point_Value")
