@@ -103,11 +103,41 @@ GLBX_HISTORY_FLOOR = "2010-06-06"   # earliest GLBX.MDP3 history
 _FEEDS = (".n.0", ".n.1")           # front + second continuous (second gives the roll gap)
 _SCHEMAS = ("ohlcv-1d", "statistics")
 
+# INTRADAY, added 2026-09-06. Deliberately NOT in `_SCHEMAS`: the nightly two-stage
+# producer is a daily-bar pipeline and nothing about it should change. Intraday is a
+# separate raw namespace with a separate puller (`scripts/databento_intraday_pull.py`)
+# because the volumes differ by three orders of magnitude (39.5M ohlcv-1m records for 30
+# symbols over 2022-2026 against a few thousand daily bars) and because it is fetched
+# through the BATCH api rather than `timeseries.get_range`.
+#
+# Schema choice dominates cost. Priced 2026-09-06 for 30 CME symbols over 2022-01 to
+# 2026-09 via the free `metadata.get_cost`: ohlcv-1h $7.51, ohlcv-1m $144.07, ohlcv-1s
+# $1,767.64, trades $2,832.72. Minute bars are the granularity a news-failure path needs
+# and are 12x cheaper than second bars.
+INTRADAY_SCHEMA = "ohlcv-1m"
+
+
+def intraday_raw_path(symbol: str, feed: str = ".n.0", schema: str = INTRADAY_SCHEMA) -> Path:
+    """Producer-internal raw path for an intraday schema, namespaced away from the daily
+    store so no consumer or sync picks it up by accident."""
+    return raw_root() / "intraday" / schema / f"{symbol}{feed}.parquet"
+
 
 def raw_root() -> Path:
     """Producer-internal databento raw store: $MARKETDATA_DATABENTO_RAW if set, else a
     ``_raw/databento`` namespace under the marketdata store (leading underscore = not a
-    consumer domain; exclude it from any consumer sync)."""
+    consumer domain; exclude it from any consumer sync).
+
+    **The fallback is a live hazard on the Mac and bit once, 2026-09-06.** The var is
+    exported from `~/.zshrc` but NOT from `~/.bash_profile`, so anything launched from a
+    bash context silently takes the fallback and writes into `$MARKETDATA_STORE/_raw/`.
+    That tree is the destination of the Windows producer's nightly `robocopy /MIR`, and
+    `/MIR` purges whatever the SOURCE lacks, so producer-internal data written on the Mac
+    alone is a delayed-action delete unless the sync's exclusions cover `_raw`. A 138 MB
+    intraday pull landed there and was moved to the configured location by hand.
+
+    If you are adding a caller: set the variable explicitly rather than trusting the
+    environment, and check where `raw_root()` actually resolved before a long fetch."""
     env = os.environ.get("MARKETDATA_DATABENTO_RAW", "").strip()
     return Path(env) if env else (config.store_root() / "_raw" / "databento")
 
