@@ -126,7 +126,18 @@ def intraday_raw_path(symbol: str, feed: str = ".n.0", schema: str = INTRADAY_SC
 def raw_root() -> Path:
     """Producer-internal databento raw store: $MARKETDATA_DATABENTO_RAW if set, else a
     ``_raw/databento`` namespace under the marketdata store (leading underscore = not a
-    consumer domain; exclude it from any consumer sync)."""
+    consumer domain; exclude it from any consumer sync).
+
+    **The fallback is a live hazard on the Mac and bit once, 2026-09-06.** The var is
+    exported from `~/.zshrc` but NOT from `~/.bash_profile`, so anything launched from a
+    bash context silently takes the fallback and writes into `$MARKETDATA_STORE/_raw/`.
+    That tree is the destination of the Windows producer's nightly `robocopy /MIR`, and
+    `/MIR` purges whatever the SOURCE lacks, so producer-internal data written on the Mac
+    alone is a delayed-action delete unless the sync's exclusions cover `_raw`. A 138 MB
+    intraday pull landed there and was moved to the configured location by hand.
+
+    If you are adding a caller: set the variable explicitly rather than trusting the
+    environment, and check where `raw_root()` actually resolved before a long fetch."""
     env = os.environ.get("MARKETDATA_DATABENTO_RAW", "").strip()
     return Path(env) if env else (config.store_root() / "_raw" / "databento")
 
