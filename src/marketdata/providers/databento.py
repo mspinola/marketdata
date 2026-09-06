@@ -103,6 +103,25 @@ GLBX_HISTORY_FLOOR = "2010-06-06"   # earliest GLBX.MDP3 history
 _FEEDS = (".n.0", ".n.1")           # front + second continuous (second gives the roll gap)
 _SCHEMAS = ("ohlcv-1d", "statistics")
 
+# INTRADAY, added 2026-09-06. Deliberately NOT in `_SCHEMAS`: the nightly two-stage
+# producer is a daily-bar pipeline and nothing about it should change. Intraday is a
+# separate raw namespace with a separate puller (`scripts/databento_intraday_pull.py`)
+# because the volumes differ by three orders of magnitude (39.5M ohlcv-1m records for 30
+# symbols over 2022-2026 against a few thousand daily bars) and because it is fetched
+# through the BATCH api rather than `timeseries.get_range`.
+#
+# Schema choice dominates cost. Priced 2026-09-06 for 30 CME symbols over 2022-01 to
+# 2026-09 via the free `metadata.get_cost`: ohlcv-1h $7.51, ohlcv-1m $144.07, ohlcv-1s
+# $1,767.64, trades $2,832.72. Minute bars are the granularity a news-failure path needs
+# and are 12x cheaper than second bars.
+INTRADAY_SCHEMA = "ohlcv-1m"
+
+
+def intraday_raw_path(symbol: str, feed: str = ".n.0", schema: str = INTRADAY_SCHEMA) -> Path:
+    """Producer-internal raw path for an intraday schema, namespaced away from the daily
+    store so no consumer or sync picks it up by accident."""
+    return raw_root() / "intraday" / schema / f"{symbol}{feed}.parquet"
+
 
 def raw_root() -> Path:
     """Producer-internal databento raw store: $MARKETDATA_DATABENTO_RAW if set, else a
