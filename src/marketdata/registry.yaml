@@ -65,6 +65,32 @@ Commodity ETF:
     yahoo: "GLD"
     inception: "2004-11-18"
 
+# The tape-context set: four ratios cot-analyzer scores on the crowd board's own
+# windows beside COT positioning (docs/design/breadth-domain-scoping.md). Each new
+# symbol is one leg of a ratio whose other leg was already here. Ratios with a
+# dividend gap between the legs (XLP/QQQ, HYG/IEF) must be drawn on the `total`
+# tier: XLP distributes ~2.5%/yr against QQQ's <1%, so a split-tier ratio drifts
+# about two points a year in QQQ's favour. Chosen because they need no new vendor:
+# Norgate's breadth series ($/# indicators) need a US Stocks subscription this
+# deployment does not have, and RSP/SPY is the cheapest honest breadth proxy.
+Sector ETF:
+  XLP:
+    yahoo: "XLP"
+    inception: "1998-12-16"
+    note: "Consumer Staples Select Sector SPDR. Defensive leg of XLP/QQQ (defensive vs growth). Class name kept generic so XLK/XLU can join it."
+
+Equal Weight ETF:
+  RSP:
+    yahoo: "RSP"
+    inception: "2003-04-24"
+    note: "Invesco S&P 500 Equal Weight. RSP/SPY falls when a few names carry the index: the breadth proxy that stands in for new-highs counts until a breadth vendor exists."
+
+Credit ETF:
+  HYG:
+    yahoo: "HYG"
+    inception: "2007-04-04"
+    note: "iShares iBoxx $ High Yield Corporate Bond. HYG/IEF is credit appetite; total tier only, both legs distribute monthly."
+
 Broad Bond ETF:
   AGG:
     yahoo: "AGG"
@@ -102,6 +128,10 @@ Volatility Index:
     yahoo: "^GVZ"
     inception: "2008-06-03"
     note: "CBOE gold ETF (GLD) implied vol. Implied series, not tradable. Realized counterpart: GC."
+  VIX3M:
+    yahoo: "^VIX3M"
+    inception: "2007-12-04"
+    note: "CBOE 3-month S&P 500 implied vol (formerly VXV). Implied series, not tradable. VIX3M/VIX is the term-structure read: below 1 means the front is above the 3-month, the inversion that marks stress. Tape-context set, not trading_riot."
 
 # ── Futures ───────────────────────────────────────────────────────────────
 # Ported from cotdata's registry (ADR-0007 step 2: bars move here, CFTC

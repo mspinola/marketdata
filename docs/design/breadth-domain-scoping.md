@@ -1,7 +1,7 @@
 # Scoping: a breadth domain for marketdata, and the XLP registry entry
 
 **Date:** 2026-09-13
-**Status:** proposed. No code, no registry entries, no store writes.
+**Status:** Part A landed (see UPDATE at the end); Part B proposed, no code.
 **Why now:** cot-analyzer wants a tape-context row beside COT positioning: net
 new 52-week highs and lows, the share of stocks above a moving average, and a
 defensive-versus-growth ratio (staples against QQQ). The prompt was the pair of
@@ -281,3 +281,25 @@ one the rates proposal asked for, one new "series" domain that both can share,
 plus a new nightly task on the Windows box. The exact FOMO read is not
 available from this vendor at any tier without building it ourselves; the
 20-day version is, and it should be called what it is.
+
+## UPDATE 2026-09-13: no Norgate upgrade for now, so Part A grew to four legs
+
+Decision: do not buy a US Stocks tier yet. Part B stays proposed. Without the
+vendor breadth series the context row is built from ETF ratios, and the registry
+gained the legs it was missing, all on the existing equities task:
+
+| Ratio | Reads | New leg | Tier |
+|---|---|---|---|
+| XLP / QQQ | defensive against growth | `XLP` | total |
+| RSP / SPY | equal-weight against cap-weight, the breadth proxy | `RSP` | total |
+| HYG / IEF | credit appetite | `HYG` | total |
+| VIX3M / VIX | vol term structure, below 1 is inversion | `VIX3M` | passthrough |
+
+Each is scored on the crowd board's 13, 26 and 52-week windows with the range
+index the board already uses. The same rules apply as for XLP alone: seed on the
+Windows box by pulling this registry change there, let the 17:30 task deliver,
+verify the four `equities/yfinance/` manifest entries next morning. Home-grown
+breadth from constituents was considered and rejected for now: several hundred
+extra yfinance symbols a night, and a survivorship-biased history that is only
+honest if recorded append-only from launch. The exact net new-highs count remains
+the one read gated on the subscription.
