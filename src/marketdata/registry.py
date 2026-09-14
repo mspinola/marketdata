@@ -19,7 +19,11 @@ from typing import Dict, List, Optional
 
 import yaml
 
-PRICE_SOURCES = ("yfinance", "norgate", "databento")
+# Order matters for `resolve_source`'s last resort: a symbol with no explicit
+# override and a default that cannot serve it goes to the FIRST vendor here that
+# can. cboe is last on purpose: it serves indices Yahoo also carries, and must only
+# win by explicit `price_source`, never by being tried first.
+PRICE_SOURCES = ("yfinance", "norgate", "databento", "cboe")
 
 # Instrument domains. The domain sets the adjustment axis (see adjust.DOMAIN_TIERS)
 # and is a path component in the store, so a futures ES and an equity ES could
@@ -43,6 +47,10 @@ class Symbol:
     # domain. Explicit `databento: null` marks a futures market GLBX does not carry
     # (ICE softs, lumber, the dollar index).
     databento: Optional[str] = None
+    # Cboe index symbol (the <symbol> in Cboe's <symbol>_History.csv). NEVER
+    # defaulted: only the volatility indices exist there, and a defaulted value
+    # would let `resolve_source` send SPY to a vendor that cannot serve it.
+    cboe: Optional[str] = None
     price_source: Optional[str] = None
     inception: Optional[str] = None
     note: Optional[str] = None
@@ -132,6 +140,7 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
                 yahoo=attrs.get("yahoo", internal),
                 norgate=attrs.get("norgate", internal),
                 databento=attrs.get("databento", internal if dom == "futures" else None),
+                cboe=attrs.get("cboe"),
                 price_source=_validate_source(attrs.get("price_source"), internal),
                 inception=attrs.get("inception"),
                 note=attrs.get("note"),
@@ -139,7 +148,7 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
             if resolve_source(sym) is None:
                 raise ValueError(
                     f"marketdata registry: symbol '{internal}' has no vendor that can "
-                    f"serve it (yahoo, norgate and databento are all null).")
+                    f"serve it (yahoo, norgate, databento and cboe are all null).")
             registry[internal] = sym
     return registry
 
@@ -151,6 +160,8 @@ def _can_serve(sym: Symbol, source: str) -> bool:
         return sym.norgate is not None
     if source == "databento":
         return sym.databento is not None
+    if source == "cboe":
+        return sym.cboe is not None
     raise ValueError(f"unknown price source {source!r}; expected one of {PRICE_SOURCES}")
 
 

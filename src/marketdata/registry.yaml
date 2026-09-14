@@ -7,7 +7,11 @@
 #   norgate       Norgate symbol. null means Norgate cannot serve it. Left unset
 #                 (defaults to the internal name) so the seam is ready if a
 #                 Norgate US Stocks subscription lands. See ADR note in README.
-#   price_source  per-symbol override: yfinance | norgate
+#   cboe          Cboe index symbol, the <symbol> of Cboe's <symbol>_History.csv.
+#                 Never defaulted; only the volatility indices exist there. Pair it
+#                 with `price_source: cboe`, since Yahoo carries the same tickers
+#                 and the deployment default would otherwise win.
+#   price_source  per-symbol override: yfinance | norgate | cboe
 #   inception     first date the instrument existed, for a sanity check on fetch
 #   note          free text
 #
@@ -130,8 +134,10 @@ Volatility Index:
     note: "CBOE gold ETF (GLD) implied vol. Implied series, not tradable. Realized counterpart: GC."
   VIX3M:
     yahoo: "^VIX3M"
+    cboe: "VIX3M"
+    price_source: cboe
     inception: "2007-12-04"
-    note: "CBOE 3-month S&P 500 implied vol (formerly VXV). Implied series, not tradable. VIX3M/VIX is the term-structure read: below 1 means the front is above the 3-month, the inversion that marks stress. Tape-context set, not trading_riot."
+    note: "CBOE 3-month S&P 500 implied vol (formerly VXV). Implied series, not tradable. VIX3M/VIX is the term-structure read: below 1 means the front is above the 3-month, the inversion that marks stress. Tape-context set, not trading_riot. Pinned to Cboe's own CSV because Yahoo serves this ticker patchily (measured 2026-09-14: a full pull ended 2026-07-17, a 3-month pull had 24 rows against 64 for ^VIX); Cboe's file starts 2009-09-18."
 
 # ── Futures ───────────────────────────────────────────────────────────────
 # Ported from cotdata's registry (ADR-0007 step 2: bars move here, CFTC

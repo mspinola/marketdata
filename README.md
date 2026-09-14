@@ -146,6 +146,20 @@ Both vendors land in the same store under different paths
 crontab line, why the cold-start backfill is not the nightly job, and what to do when the
 resume ledger and the disk disagree.
 
+### The volatility indices from Cboe
+
+`providers/cboe.py` reads Cboe's own daily CSV
+(`cdn.cboe.com/api/global/us_indices/daily_prices/<symbol>_History.csv`): no key,
+no account, one GET. It exists because Yahoo serves the Cboe term-structure
+indices patchily (measured 2026-09-14: a full pull of `^VIX3M` ended two months
+early and a three-month pull had 24 rows against 64 for `^VIX`). A symbol is
+served here only when its registry entry carries a `cboe` key AND
+`price_source: cboe`; Yahoo carries the same tickers, so without the pin the
+deployment default wins. It runs inside `--bars --domain equities`, after
+yfinance, on any box with outbound HTTPS. Only `VIX3M` is pinned to it today;
+`VIX` stays on Yahoo, which serves it completely, and a consumer in another repo
+documents fetching it from there.
+
 ### Pinning a store for a study
 
 A study that quotes numbers is only reproducible if the data behind them is

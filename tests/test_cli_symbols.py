@@ -12,6 +12,7 @@ hands to its consumers, months after the retirement, looking like a typo.
 import pytest
 
 from marketdata import update
+from marketdata.providers import cboe as cprov
 from marketdata.providers import norgate as nprov
 from marketdata.providers import yfinance as yprov
 from marketdata.registry import all_symbols
@@ -32,6 +33,7 @@ def a_registered_equities_symbol() -> str:
 
 
 YF_OK = {"kind": "bars_yahoo", "ok": True, "wrote": 1, "failed": 0}
+CB_OK = {"kind": "bars_cboe", "ok": True, "wrote": 0, "failed": 0}
 NG_OK = {"kind": "bars_futures_norgate", "ok": True, "wrote": 1, "failed": 0,
          "errors": [], "rows": 10, "newest": "2026-08-20"}
 
@@ -58,6 +60,7 @@ def test_refused_even_when_other_requested_symbols_are_valid(capsys):
 def test_a_registered_symbol_is_not_refused(monkeypatch):
     """The guard must not over-fire on the case it exists to protect."""
     monkeypatch.setattr(yprov, "update", lambda *a, **k: YF_OK)
+    monkeypatch.setattr(cprov, "update", lambda *a, **k: CB_OK)
     monkeypatch.setattr(nprov, "update", lambda *a, **k: NG_OK)
     sym = a_registered_equities_symbol()
     assert update.main(["--bars", "--domain", "equities", "--symbols", sym]) == 0
@@ -69,6 +72,7 @@ def test_an_equities_symbol_does_not_fail_the_futures_half(monkeypatch):
     is why the check lives in main() and not in each provider: a per-provider
     refusal would fail a run the other half handled perfectly well."""
     monkeypatch.setattr(yprov, "update", lambda *a, **k: YF_OK)
+    monkeypatch.setattr(cprov, "update", lambda *a, **k: CB_OK)
     monkeypatch.setattr(nprov, "update", lambda *a, **k: NG_OK)
     sym = a_registered_equities_symbol()
     assert update.main(["--bars", "--symbols", sym]) == 0
@@ -76,5 +80,6 @@ def test_an_equities_symbol_does_not_fail_the_futures_half(monkeypatch):
 
 def test_no_symbols_means_no_check(monkeypatch):
     monkeypatch.setattr(yprov, "update", lambda *a, **k: YF_OK)
+    monkeypatch.setattr(cprov, "update", lambda *a, **k: CB_OK)
     monkeypatch.setattr(nprov, "update", lambda *a, **k: NG_OK)
     assert update.main(["--bars", "--domain", "equities"]) == 0

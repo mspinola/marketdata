@@ -18,13 +18,18 @@ RATIOS = {
 }
 
 
+# The one leg not on Yahoo: pinned to Cboe's own CSV because Yahoo serves it
+# patchily (see the registry note and providers/cboe.py).
+PINNED = {"VIX3M": "cboe"}
+
+
 @pytest.mark.parametrize("leg, other", sorted(RATIOS.items()))
 def test_both_legs_of_each_ratio_are_registered_equities(leg, other):
     for sym in (leg, other):
         s = registry.REGISTRY[sym]
         assert s.domain == "equities"
         assert s.yahoo is not None
-        assert registry.resolve_source(s, "yfinance") == "yfinance"
+        assert registry.resolve_source(s, "yfinance") == PINNED.get(sym, "yfinance")
 
 
 def test_the_vol_legs_are_yahoo_index_tickers():
