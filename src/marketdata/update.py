@@ -236,8 +236,13 @@ def main(argv=None) -> int:
 
     if args.bars:
         if args.domain in (None, "equities"):
+            from .providers import cboe as cprov
             from .providers import yfinance as yprov
             results.append(yprov.update(args.symbols))
+            # Same domain, second vendor: the volatility indices pinned to Cboe's
+            # CSV. Its target list is empty unless a registry symbol resolves to
+            # it, so a deployment with none pays one no-op.
+            results.append(cprov.update(args.symbols))
         if args.domain in (None, "futures"):
             from .providers import norgate as nprov
             # An unscoped --bars run should produce everything this machine CAN
