@@ -105,6 +105,12 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
     comparison between two points on one series. `unadj` is as-traded and does
     not restate, so an `asof` read of it is a plain truncation.
 
+    Series tier (breadth counts, put/call ratios, from the `series` domain):
+      'raw'     : the vendor's reading as published. The only tier: nothing
+                  adjusts a count of stocks at new highs. `Close` is the value.
+                  `asof` raises, because a published reading does not restate
+                  and `end` already says what a vintage would say.
+
     `domain` is resolved from the registry and rarely passed. `source` pins the
     vendor. Omit it and the registry resolves one for this deployment. Pass it
     explicitly to compare vendors on the same symbol, which is the point of
@@ -129,6 +135,14 @@ def get_bars(symbol: str, adjustment: Optional[str] = None, *,
 
     if dom == "futures":
         out = _futures_bars(symbol, src, adjustment, asof=asof)
+    elif dom == "series":
+        if asof is not None:
+            raise NotImplementedError(
+                f"asof= is a futures concept and {symbol!r} is a published series. "
+                "A breadth count or a put/call ratio does not restate, so the "
+                "series as it stood on a date is the series truncated there: "
+                "pass end= instead.")
+        out = _series_bars(symbol, src)
     else:
         if asof is not None:
             raise NotImplementedError(
@@ -211,6 +225,16 @@ def _equity_bars(symbol: str, dom: str, src: str, tier: str, *,
                   include_capital_gains=include_capital_gains)
 
 
+def _series_bars(symbol: str, src: str) -> pd.DataFrame:
+    """One stored frame, served as-is. The `raw` tier is the stored frame, so
+    there is nothing to derive and nothing to check beyond presence."""
+    df = store.read_bars(symbol, "series", src)
+    if df.empty:
+        _missing(symbol, "series", src)
+        return df
+    return _normalized(df)
+
+
 def _futures_bars(symbol: str, src: str, tier: str,
                   asof: Optional[str] = None) -> pd.DataFrame:
     """Two stored frames; `propadj` derived from both.
@@ -273,7 +297,8 @@ def _symbol_of(stem: str, dom: str) -> str:
     """Strip a stored-tier suffix off a filename stem, so `available()` answers in
     SYMBOLS in every domain. Without this, futures would report 'ES_backadj' and
     'ES_unadj' and every caller would have to re-parse the store's file naming."""
-    for tier in stored_tiers_for(dom) if dom in ("equities", "futures") else ():
+    from .adjust import STORED_TIERS
+    for tier in stored_tiers_for(dom) if dom in STORED_TIERS else ():
         if tier and stem.endswith(f"_{tier}"):
             return stem[: -len(tier) - 1]
     return stem

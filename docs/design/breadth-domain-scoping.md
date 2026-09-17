@@ -1,7 +1,8 @@
 # Scoping: a breadth domain for marketdata, and the XLP registry entry
 
 **Date:** 2026-09-13
-**Status:** Part A landed (see UPDATE at the end); Part B proposed, no code.
+**Status:** Part A landed (see UPDATE at the end); Part B landed 2026-09-17 with a
+different vendor (see the second UPDATE at the end).
 **Why now:** cot-analyzer wants a tape-context row beside COT positioning: net
 new 52-week highs and lows, the share of stocks above a moving average, and a
 defensive-versus-growth ratio (staples against QQQ). The prompt was the pair of
@@ -303,3 +304,22 @@ breadth from constituents was considered and rejected for now: several hundred
 extra yfinance symbols a night, and a survivorship-biased history that is only
 honest if recorded append-only from launch. The exact net new-highs count remains
 the one read gated on the subscription.
+
+---
+
+## UPDATE 2026-09-17: Part B landed, from TradingView rather than Norgate
+
+The `series` domain exists as designed above (`raw` tier only, one flat frame,
+`bars/series/<source>/<symbol>.parquet`, `--domain series` refused by `--bars`,
+`coverage_gaps` unchanged). The vendor is not Norgate. TradingView publishes the
+exact series the AGI scripts read, including the 5-day share this document said
+had to be substituted or rebuilt, and the Windows producer box runs Claude Code
+Desktop on the account that holds the TradingView connector, so a Desktop local
+routine there is the fetch. `providers/tradingview.py` is the build step, with
+the guards that stand between a language model and the store. The registry
+carries eleven series under `Market Breadth` and `Options Sentiment`, with
+`kind` and `anchors`. The measurements, the routine's shape and the verifier
+changes are in cot-analyzer's `docs/design/tradingview-breadth-scoping.md`;
+the amendment to this document's Part B conclusions is recorded in cot-analyzer's
+`docs/design/amendments-2026-09-16.md`. The Norgate path above remains the
+design for the advance/decline family if it is ever wanted.

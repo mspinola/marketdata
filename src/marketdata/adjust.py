@@ -52,6 +52,10 @@ TIERS = ("split", "raw", "total")
 DOMAIN_TIERS = {
     "equities": ("split", "raw", "total"),
     "futures": ("backadj", "unadj", "propadj"),
+    # A published reading (a breadth count, a put/call ratio) has no corporate
+    # action and no roll, so nothing adjusts it. One tier, and it is the stored
+    # frame. The name says what the consumer gets: the vendor's number, as served.
+    "series": ("raw",),
 }
 
 # Which tiers are STORED (the vendor computed them and we cannot rebuild them)
@@ -70,10 +74,15 @@ DOMAIN_TIERS = {
 STORED_TIERS = {
     "equities": (None,),
     "futures": ("backadj", "unadj"),
+    # One flat frame, no tier in the path, like equities.
+    "series": (None,),
 }
 DERIVED_TIERS = {
     "equities": ("split", "raw", "total"),
     "futures": ("propadj",),
+    # The identity, as equities' `split` is: the reader hands back the stored
+    # frame. Listed here so the stored-or-derived partition stays total.
+    "series": ("raw",),
 }
 
 

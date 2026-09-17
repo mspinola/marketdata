@@ -191,11 +191,25 @@ ones.
 |---|---|---|---|
 | `equities` | `split`, `raw`, `total` | one frame | all three |
 | `futures` | `backadj`, `unadj`, `propadj` | **both** `backadj` and `unadj` | `propadj` |
+| `series` | `raw` | one frame | `raw` (the identity) |
 
 Equities derive everything because corporate actions arrive as dated events
 alongside the bars. Futures cannot: Norgate's back-adjustment is roll splicing it
 performed itself, and the stitched calendar spread at each roll appears in no
 other series, so `backadj` and `unadj` are two separate stored facts.
+
+`series` is the third domain and the odd one out: published daily readings that
+are not prices of a tradable thing (the share of Nasdaq stocks above their 5-day
+average, counts of new 52-week highs and lows, the Cboe put/call ratios). No
+corporate action and no roll applies, so the one tier is the stored frame and
+`Close` is the reading. They come from TradingView, which has no data API, so
+the producer is a Claude Code Desktop local routine on the Windows box writing
+the connector's results verbatim, plus `marketdata-update --build-tradingview`,
+which validates those files (overlap agreement with the store, range by `kind`,
+a session gate, registry anchors) and appends only what the store lacks. The
+raw files are producer-internal and outside every sync. Rationale and the
+guards: `providers/tradingview.py`, `docs/design/breadth-domain-scoping.md` and
+cot-analyzer's `docs/design/tradingview-breadth-scoping.md`.
 
 ```mermaid
 flowchart LR

@@ -11,8 +11,17 @@
 #                 Never defaulted; only the volatility indices exist there. Pair it
 #                 with `price_source: cboe`, since Yahoo carries the same tickers
 #                 and the deployment default would otherwise win.
-#   price_source  per-symbol override: yfinance | norgate | cboe
+#   tradingview   TradingView symbol, EXCHANGE:TICKER ("INDEX:NCFD"). Never
+#                 defaulted; only the `series` domain lives there. The producer is
+#                 a Claude routine on the box plus `--build-tradingview`, not a
+#                 fetch (providers/tradingview.py).
+#   price_source  per-symbol override: yfinance | norgate | cboe | tradingview
 #   inception     first date the instrument existed, for a sanity check on fetch
+#   kind          `series` only: percent | count | ratio. Fixes the range the
+#                 build validates against.
+#   anchors       `series` only: {date: value} published readings the build
+#                 re-verifies whenever it touches those dates. The proof that a
+#                 vendor symbol string still names the same series.
 #   note          free text
 #
 # SURVIVORSHIP: every symbol here is currently listed. yfinance cannot serve
@@ -226,3 +235,81 @@ Live Stock:
 Crypto:
   BTC: {norgate: "&BTC", yahoo: null}
   ETH: {norgate: "&ETH", yahoo: null}
+
+# ── Series ────────────────────────────────────────────────────────────────
+# Published daily readings that are not prices: the `series` domain, one `raw`
+# tier, stored as served. Produced by a Claude Code Desktop local routine on the
+# Windows box that writes the TradingView connector's results verbatim, and
+# `marketdata-update --build-tradingview`, which validates and writes. Scoping,
+# the measurements and the guards: cot-analyzer docs/design/
+# tradingview-breadth-scoping.md and docs/design/breadth-domain-scoping.md here.
+#
+# Internal names say which universe: NASDAQ_ is the Nasdaq COMPOSITE (the FOMO
+# script's universe, settled by its Pine source), not the Nasdaq-100; SPX_ the
+# S&P 500; NYSE_ the NYSE composite. `inception` is the first bar the connector
+# served; for the 2006 series that is the 5000-bar cap of one pull, not the
+# vendor's floor, and is marked so.
+#
+# Context, not signal: nothing here has been through the evaluation ladder or
+# crucible. A zone label downstream is a published cutoff restated.
+Market Breadth:
+  NASDAQ_FOMO_5D:
+    tradingview: "INDEX:NCFD"
+    kind: percent
+    inception: "2018-12-07"
+    anchors:
+      "2026-07-29": 48.05
+      "2026-09-16": 32.23
+    note: "Percent of Nasdaq Composite stocks above their own 5-day average: the AGI 'FOMO' read (agi/indicators/fomo.pine reads this symbol and computes nothing). Anchors: 2026-07-29 is the EDGE report's printed 48%; 2026-09-16 was pulled after the close on the producer box and on a Mac, identical. Zones: cotmetrics.indicators.fomo_zone."
+  SPX_FOMO_5D:
+    tradingview: "INDEX:S5FD"
+    kind: percent
+    inception: "2017-01-03"
+    note: "Percent of S&P 500 stocks above their own 5-day average. The FOMO script's alternative universe."
+  NASDAQ_PCT_ABOVE_20D:
+    tradingview: "INDEX:NCTW"
+    kind: percent
+    inception: "2018-12-07"
+    note: "Percent of Nasdaq Composite stocks above their 20-day average. Same family as NCFD (TW = twenty-day). Not FOMO; do not label it so."
+  NASDAQ_PCT_ABOVE_200D:
+    tradingview: "INDEX:NCTH"
+    kind: percent
+    inception: "2018-12-07"
+    note: "Percent of Nasdaq Composite stocks above their 200-day average (TH = two hundred). Slow enough for a weekly range index."
+  SPX_PCT_ABOVE_200D:
+    tradingview: "INDEX:S5TH"
+    kind: percent
+    inception: "2003-12-23"
+    note: "Percent of S&P 500 stocks above their 200-day average. `inception` is the oldest bar a 5000-bar pull served, not the vendor's floor."
+  NASDAQ_NH52W:
+    tradingview: "INDEX:HIGQ"
+    kind: count
+    inception: "2006-10-30"
+    note: "Nasdaq stocks at a new 52-week high, daily count. The pair HIGQ/LOWQ is the one the AGI M-01 regime uses (agi/indicators/nasdaq_net_highs.pine); other vendor filters give different numbers. `inception` is a 5000-bar cap, not the floor. Regime: cotmetrics.indicators.net_highs_regime on NH - NL."
+  NASDAQ_NL52W:
+    tradingview: "INDEX:LOWQ"
+    kind: count
+    inception: "2006-10-31"
+    note: "Nasdaq stocks at a new 52-week low, daily count. Kept as its own series: the legs are read apart, not only as a net. `inception` is a 5000-bar cap."
+  NYSE_NH52W:
+    tradingview: "INDEX:HIGN"
+    kind: count
+    inception: "2006-10-26"
+    note: "NYSE stocks at a new 52-week high, daily count. `inception` is a 5000-bar cap."
+  NYSE_NL52W:
+    tradingview: "INDEX:LOWN"
+    kind: count
+    inception: "2006-09-29"
+    note: "NYSE stocks at a new 52-week low, daily count. `inception` is a 5000-bar cap."
+
+Options Sentiment:
+  CBOE_PCC:
+    tradingview: "USI:PCC"
+    kind: ratio
+    inception: "2006-10-26"
+    note: "Cboe total put/call ratio, daily. The one series in this domain that measures positioning rather than breadth, the nearest cousin to COT on the crowd board. `inception` is a 5000-bar cap."
+  CBOE_PCCE:
+    tradingview: "USI:PCCE"
+    kind: ratio
+    inception: "2007-01-23"
+    note: "Cboe equity-only put/call ratio, daily. Excludes index options, so it reads retail and single-stock hedging more than the total does."

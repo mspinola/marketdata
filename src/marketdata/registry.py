@@ -23,13 +23,25 @@ import yaml
 # override and a default that cannot serve it goes to the FIRST vendor here that
 # can. cboe is last on purpose: it serves indices Yahoo also carries, and must only
 # win by explicit `price_source`, never by being tried first.
-PRICE_SOURCES = ("yfinance", "norgate", "databento", "cboe")
+# tradingview serves only symbols that carry an explicit `tradingview` key (the
+# `series` domain), so its position is immaterial to every other symbol.
+PRICE_SOURCES = ("yfinance", "norgate", "databento", "tradingview", "cboe")
 
 # Instrument domains. The domain sets the adjustment axis (see adjust.DOMAIN_TIERS)
 # and is a path component in the store, so a futures ES and an equity ES could
 # coexist without either pretending to be the other.
-DOMAINS = ("equities", "futures")
+#
+# `series` is the third: vendor-published daily readings that are not prices of a
+# tradable thing (a count of stocks at new highs, a share above a moving average, a
+# put/call ratio). No corporate action and no roll applies, so the domain has one
+# tier, `raw`, stored exactly as served. See docs/design/breadth-domain-scoping.md.
+DOMAINS = ("equities", "futures", "series")
 DEFAULT_DOMAIN = "equities"
+
+# What a `series` reading is, which fixes the range the producer validates it
+# against: a percent sits in 0-100, a count is a non-negative integer, a ratio is a
+# positive number with a loose ceiling. Producer-side only; the store does not care.
+SERIES_KINDS = ("percent", "count", "ratio")
 
 
 @dataclass(frozen=True)
@@ -51,9 +63,19 @@ class Symbol:
     # defaulted: only the volatility indices exist there, and a defaulted value
     # would let `resolve_source` send SPY to a vendor that cannot serve it.
     cboe: Optional[str] = None
+    # TradingView symbol in EXCHANGE:TICKER form ("INDEX:NCFD"). NEVER defaulted, for
+    # the same reason as `cboe`: only the `series` domain lives there, and a defaulted
+    # value would route every symbol to a vendor that serves none of them.
+    tradingview: Optional[str] = None
     price_source: Optional[str] = None
     inception: Optional[str] = None
     note: Optional[str] = None
+    # `series` domain only: one of SERIES_KINDS. None elsewhere.
+    kind: Optional[str] = None
+    # `series` domain only: ((date, value), ...) of published readings the producer
+    # re-verifies on every build that touches those dates. The standing proof that a
+    # vendor symbol string still names the same series it did when it was registered.
+    anchors: tuple = ()
 
 
 # Asset class -> domain, so the YAML does not repeat `domain:` on every symbol.
@@ -78,6 +100,8 @@ _CLASS_DOMAIN = {
     "Softs": "futures",
     "Live Stock": "futures",
     "Crypto": "futures",
+    "Market Breadth": "series",
+    "Options Sentiment": "series",
 }
 
 
@@ -133,22 +157,45 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
                 raise ValueError(
                     f"marketdata registry: symbol '{internal}' has domain "
                     f"'{dom}', expected one of {DOMAINS}.")
+            # A series reading has no Yahoo or Norgate ticker of the same name, so
+            # the equities-era defaults (vendor symbol = internal name) would claim
+            # two vendors that cannot serve it. Series symbols name their vendor
+            # explicitly or resolve to nothing, which the check below refuses.
+            is_series = dom == "series"
+            kind = attrs.get("kind")
+            if is_series and kind not in SERIES_KINDS:
+                raise ValueError(
+                    f"marketdata registry: series symbol '{internal}' has kind "
+                    f"{kind!r}, expected one of {SERIES_KINDS}.")
+            if not is_series and kind is not None:
+                raise ValueError(
+                    f"marketdata registry: symbol '{internal}' carries `kind`, which "
+                    f"is a `series` domain attribute, but is in domain '{dom}'.")
+            anchors = attrs.get("anchors") or {}
+            if not isinstance(anchors, dict):
+                raise ValueError(
+                    f"marketdata registry: symbol '{internal}' anchors must be a "
+                    f"mapping of date -> value, got {type(anchors).__name__}.")
             sym = Symbol(
                 internal=internal,
                 asset_class=asset_class,
                 domain=dom,
-                yahoo=attrs.get("yahoo", internal),
-                norgate=attrs.get("norgate", internal),
+                yahoo=attrs.get("yahoo", None if is_series else internal),
+                norgate=attrs.get("norgate", None if is_series else internal),
                 databento=attrs.get("databento", internal if dom == "futures" else None),
                 cboe=attrs.get("cboe"),
+                tradingview=attrs.get("tradingview"),
                 price_source=_validate_source(attrs.get("price_source"), internal),
                 inception=attrs.get("inception"),
                 note=attrs.get("note"),
+                kind=kind,
+                anchors=tuple(sorted((str(k), float(v)) for k, v in anchors.items())),
             )
             if resolve_source(sym) is None:
                 raise ValueError(
                     f"marketdata registry: symbol '{internal}' has no vendor that can "
-                    f"serve it (yahoo, norgate, databento and cboe are all null).")
+                    f"serve it (yahoo, norgate, databento, tradingview and cboe are "
+                    f"all null).")
             registry[internal] = sym
     return registry
 
@@ -162,6 +209,8 @@ def _can_serve(sym: Symbol, source: str) -> bool:
         return sym.databento is not None
     if source == "cboe":
         return sym.cboe is not None
+    if source == "tradingview":
+        return sym.tradingview is not None
     raise ValueError(f"unknown price source {source!r}; expected one of {PRICE_SOURCES}")
 
 
