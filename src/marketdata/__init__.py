@@ -8,7 +8,9 @@ atomic writes + manifest provenance, adjustment derived on read).
 Two domains, two adjustment axes. EQUITIES adjust by corporate actions, which
 arrive as dated events, so one stored frame yields every tier. FUTURES adjust by
 roll splicing, which the vendor performs and does not explain, so `backadj` and
-`unadj` are both stored and `propadj` is derived from the pair.
+`unadj` are both stored and `propadj` is derived from the pair. A third domain,
+SERIES, holds published daily readings that are not prices (breadth counts, a
+put/call ratio): nothing adjusts them, so their one tier is the stored frame.
 """
 from .adjust import (
     ADJUSTMENT_VERSION,
@@ -57,7 +59,7 @@ from .registry import (
 # being valued is historical: see regimes.py and contract_regimes.yaml.
 from .store import load_manifest, read_metadata, require_schema, schema_version
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     "get_bars", "available",
     "provenance", "Provenance",

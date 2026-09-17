@@ -17,7 +17,7 @@ build-backend = "setuptools.build_meta"
 # COT-specific, and a name saying otherwise would undo the distinction the split
 # exists to draw.
 name = "crucible-marketdata"
-version = "0.2.0"
+version = "0.3.0"
 description = "Daily bars — equities, ETFs and futures — as a producer/consumer split over a file store, with adjustment derived on read."
 readme = "README.md"
 authors = [

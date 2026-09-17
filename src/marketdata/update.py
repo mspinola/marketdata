@@ -37,11 +37,12 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(prog="marketdata-update", description=__doc__)
     p.add_argument("--bars", action="store_true",
                    help="fetch bars for every registry symbol resolving to its vendor")
-    p.add_argument("--domain", choices=("equities", "futures"),
+    p.add_argument("--domain", choices=("equities", "futures", "series"),
                    help="with --bars: fetch only this domain. Default: every domain "
                         "this machine can produce. Futures need Windows + the Norgate "
                         "Data Updater, so a Mac or Linux box should pass "
-                        "--domain equities rather than fail its way there.")
+                        "--domain equities rather than fail its way there. `series` "
+                        "is not fetched by --bars at all: pass --build-tradingview.")
     p.add_argument("--metadata", action="store_true",
                    help="fetch futures contract specifications (point value, tick "
                         "size, margin) into metadata/contract_specs.parquet. Scope "
@@ -96,6 +97,20 @@ def main(argv=None) -> int:
                         "entries whose file is missing (so a restart does not skip them "
                         "as 'already current' and leave a silent hole in paid data). "
                         "Local files only, no API. Exits after.")
+    p.add_argument("--build-tradingview", action="store_true",
+                   help="series domain, no network: build the TradingView breadth and "
+                        "sentiment series from the raw JSON a Claude routine on the "
+                        "producer box writes verbatim under $MARKETDATA_TRADINGVIEW_RAW "
+                        "(else _raw/tradingview under the store). Appends only bars the "
+                        "store lacks; every bar that overlaps the store must match it "
+                        "exactly, registry anchors are re-verified, and a raw file whose "
+                        "newest bar is older than the expected session is refused with "
+                        "a non-zero exit and nothing written (the scheduled retry is the "
+                        "second routine).")
+    p.add_argument("--expect-session", metavar="YYYY-MM-DD|none",
+                   help="with --build-tradingview: the session the raw files must reach. "
+                        "Default: the latest weekday whose 16:30 ET close has passed. "
+                        "'none' disables the gate, for a build of old raw files.")
     p.add_argument("--symbols", nargs="+", metavar="SYM",
                    help="scope the fetch to these internal symbols")
     p.add_argument("--check", action="store_true",
@@ -118,10 +133,20 @@ def main(argv=None) -> int:
 
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
-            or args.reconcile_databento):
+            or args.reconcile_databento or args.build_tradingview):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
-                "--verify-pin, --stamp-flags, --ingest-databento, --build-databento "
-                "or --reconcile-databento")
+                "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
+                "--reconcile-databento or --build-tradingview")
+
+    # The series domain has no fetch: its producer is a Claude routine writing raw
+    # files, and --build-tradingview turns those into the store. `--bars --domain
+    # series` would silently do nothing, which a wrapper reads as a good run.
+    if args.bars and args.domain == "series":
+        p.error("--bars does not fetch the series domain. Its bars are built from raw "
+                "files: run --build-tradingview.")
+    if args.expect_session and not args.build_tradingview:
+        p.error("--expect-session gates the TradingView build. Pass it with "
+                "--build-tradingview.")
 
     # Refuse a gate that cannot gate anything, rather than accepting the flag and
     # doing nothing with it: a scheduled task that silently ignores --require-final
@@ -290,6 +315,13 @@ def main(argv=None) -> int:
     if args.build_databento:
         from .providers import databento as dprov
         results.append(dprov.build(args.symbols))
+
+    if args.build_tradingview:
+        from .providers import tradingview as tprov
+        expect = args.expect_session
+        if expect is not None and expect.lower() == "none":
+            expect = tprov.NO_GATE
+        results.append(tprov.build(args.symbols, expect_session=expect))
 
     for res in results:
         print(f"\n{res['kind']}: wrote={res.get('wrote', res.get('rows', 0))} "
