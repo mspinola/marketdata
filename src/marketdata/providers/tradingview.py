@@ -139,6 +139,55 @@ def expected_session(now: Optional[dt.datetime] = None) -> pd.Timestamp:
     return pd.Timestamp(day)
 
 
+# ── The backfill: TradingView's own CSV export, converted into a raw file ─────
+_CSV_COLS = ("time", "open", "high", "low", "close")
+
+
+def csv_export_to_raw(csv_path, sym: Symbol, *, when: Optional[dt.date] = None) -> Path:
+    """Turn a TradingView chart export ("Export chart data", CSV) into a raw file in
+    the connector's shape, so the same build and the same guards apply to a backfill.
+
+    Why this exists: a first fill of history through the routine would mean writing
+    thousands of bars verbatim through a language model, with no stored bars for the
+    overlap guard to catch a slip against. The export is exact and needs no
+    transcription. Its columns are ``time`` (unix seconds at the session open, or an
+    ISO timestamp) and ``open``, ``high``, ``low``, ``close``; any other column is
+    ignored. The file is written as ``<date>-csv-export.json`` beside the routine's
+    files and carries ``"source": "csv-export"`` so its origin is visible. Nothing is
+    validated here beyond the columns; :func:`build` does the rest.
+    """
+    raw = pd.read_csv(csv_path)
+    raw.columns = [str(c).strip().lower() for c in raw.columns]
+    missing = [c for c in _CSV_COLS if c not in raw.columns]
+    if missing:
+        raise RawError(f"{Path(csv_path).name}: a TradingView export needs columns "
+                       f"{_CSV_COLS}, lacking {missing}; got {list(raw.columns)}")
+    t = raw["time"]
+    if pd.api.types.is_numeric_dtype(t):
+        stamps = t.astype("int64")
+    else:
+        parsed = pd.to_datetime(t, utc=True, errors="coerce")
+        if parsed.isna().any():
+            raise RawError(f"{Path(csv_path).name}: a `time` value is neither unix "
+                           f"seconds nor an ISO timestamp")
+        # Unit-agnostic: pandas may parse ISO strings at microsecond rather than
+        # nanosecond resolution, and an astype("int64") then silently means a
+        # different unit. Timedelta arithmetic does not care.
+        stamps = (parsed - pd.Timestamp(0, tz="UTC")) // pd.Timedelta(seconds=1)
+    bars = [{"t": int(s), "o": float(o), "h": float(h), "l": float(lo), "c": float(c),
+             "v": None}
+            for s, o, h, lo, c in zip(stamps, raw["open"], raw["high"], raw["low"], raw["close"])]
+    bars.sort(key=lambda b: b["t"])
+    payload = {"success": True, "symbol": sym.tradingview, "interval": "1D",
+               "count": len(bars), "bars": bars, "source": "csv-export",
+               "file": Path(csv_path).name}
+    when = when or dt.datetime.now(SESSION_TZ).date()
+    out = raw_root() / sym.internal / f"{when.isoformat()}-csv-export.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload), encoding="utf-8")
+    return out
+
+
 # ── Parsing and validation ─────────────────────────────────────────────────
 def parse_raw(path: Path, sym: Symbol) -> pd.DataFrame:
     """One raw file as a Date-indexed OHLC frame, or `RawError` naming why not.

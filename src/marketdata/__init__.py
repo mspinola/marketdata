@@ -59,7 +59,7 @@ from .registry import (
 # being valued is historical: see regimes.py and contract_regimes.yaml.
 from .store import load_manifest, read_metadata, require_schema, schema_version
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = [
     "get_bars", "available",
     "provenance", "Provenance",
