@@ -88,6 +88,19 @@ _BAR_KEYS = ("t", "o", "h", "l", "c")
 _RANGES = {"percent": (0.0, 100.0), "count": (0.0, None), "ratio": (0.0, 10.0)}
 assert tuple(_RANGES) == SERIES_KINDS
 
+# TWO VENDOR CONVENTIONS, measured on the full-history pulls of 2026-09-17 and
+# handled in the BUILT series only; the raw file keeps what the vendor sent.
+#
+# A count of zero is printed as 0.01. Nasdaq new 52-week highs read 0.01 on
+# 2020-03-13 (the crash week's bottom) and NYSE new lows read 0.01 on 65 of 5000
+# days. Anything below this threshold on a count series is a zero, and is stored
+# as one; the whole-number check then applies to everything else.
+COUNT_ZERO_BELOW = 0.5
+# A put/call ratio of zero is impossible, and the equity-only ratio carried two
+# bars (2026-06-18, 2026-07-02) with a real open and high and a zero low and
+# close. Those are vendor holes, not readings: a ratio bar with a non-positive
+# Close is dropped and named in the build's output, never stored as 0.
+
 
 class RawError(ValueError):
     """A raw file, or a symbol's set of them, that the build refuses. The message
@@ -230,21 +243,39 @@ def parse_raw(path: Path, sym: Symbol) -> pd.DataFrame:
         raise RawError(f"{path.name}: two bars on session {dup}")
     if df[list(OHLC)].isna().any().any():
         raise RawError(f"{path.name}: a bar carries NaN")
-    _check_kind(df, sym, path)
+    df = _check_kind(df, sym, path)
+    if df.empty:
+        raise RawError(f"{path.name}: no bars left after dropping vendor holes")
     return df
 
 
-def _check_kind(df: pd.DataFrame, sym: Symbol, path: Path) -> None:
+def _check_kind(df: pd.DataFrame, sym: Symbol, path: Path) -> pd.DataFrame:
+    """Range and shape by kind, applying the two vendor conventions above. Returns
+    the frame to keep, which is the input except for dropped ratio holes."""
     lo, hi = _RANGES[sym.kind]
     vals = df[list(OHLC)].to_numpy(dtype=float)
     if (vals < lo).any() or (hi is not None and (vals > hi).any()):
         raise RawError(f"{path.name}: a value is outside the {sym.kind} range "
                        f"[{lo:g}, {'inf' if hi is None else f'{hi:g}'}]: "
                        f"min {vals.min():g}, max {vals.max():g}")
-    if sym.kind == "count" and not np.array_equal(vals, np.round(vals)):
-        raise RawError(f"{path.name}: a count is not a whole number")
-    if sym.kind == "ratio" and (vals <= 0).any():
-        raise RawError(f"{path.name}: a ratio is not positive")
+    if sym.kind == "count":
+        vals = np.where(vals < COUNT_ZERO_BELOW, 0.0, vals)
+        if not np.array_equal(vals, np.round(vals)):
+            raise RawError(f"{path.name}: a count is not a whole number")
+        df = df.copy()
+        df[list(OHLC)] = vals
+    if sym.kind == "ratio":
+        hole = df["Close"] <= 0
+        if hole.any():
+            days = ", ".join(d.strftime("%Y-%m-%d") for d in df.index[hole][:5])
+            more = f" and {int(hole.sum()) - 5} more" if hole.sum() > 5 else ""
+            print(f"{sym.internal}: {path.name}: dropped {int(hole.sum())} bar(s) with a "
+                  f"zero close, a vendor hole on a ratio series ({days}{more})")
+            df = df.loc[~hole]
+        if (df[list(OHLC)].to_numpy(dtype=float) <= 0).any():
+            raise RawError(f"{path.name}: a ratio bar has a non-positive open, high or "
+                           f"low beside a positive close")
+    return df
 
 
 def check_anchors(df: pd.DataFrame, sym: Symbol, what: str) -> None:
