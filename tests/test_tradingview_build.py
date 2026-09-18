@@ -252,3 +252,51 @@ def test_cli_refuses_bars_on_the_series_domain_and_a_stray_gate_flag(tmp_store):
         update.main(["--bars", "--domain", "series"])
     with pytest.raises(SystemExit):
         update.main(["--check", "--expect-session", "2026-09-16"])
+
+
+# ── the backfill path: a chart export becomes a raw file ───────────────────
+def _export_csv(path, bars, time_as="unix"):
+    lines = ["time,open,high,low,close,Volume"]
+    for b in bars:
+        t = b["t"] if time_as == "unix" else pd.Timestamp(b["t"], unit="s", tz="UTC").isoformat()
+        lines.append(f"{t},{b['o']},{b['h']},{b['l']},{b['c']},")
+    Path(path).write_text("\n".join(lines) + "\n")
+
+
+def test_csv_export_becomes_a_raw_file_the_build_accepts(tmp_store, tmp_path):
+    bars = payload()["bars"]
+    csv = tmp_path / "INDEX_NCFD, 1D.csv"
+    _export_csv(csv, list(reversed(bars)))          # exports are not always in order
+    out = tprov.csv_export_to_raw(csv, REGISTRY[SYM], when=dt.date(2026, 9, 17))
+    assert out.name == "2026-09-17-csv-export.json"
+    data = json.loads(out.read_text())
+    assert data["symbol"] == "INDEX:NCFD" and data["source"] == "csv-export"
+    assert [b["t"] for b in data["bars"]] == [b["t"] for b in bars]   # sorted back
+    res = tprov.build([SYM], expect_session=str(LAST.date()))
+    assert res["ok"] and res["wrote"] == 1
+    assert stored().loc[LAST, "Close"] == 32.23
+
+
+def test_csv_export_accepts_iso_timestamps_and_refuses_missing_columns(tmp_store, tmp_path):
+    bars = payload()["bars"]
+    csv = tmp_path / "iso.csv"
+    _export_csv(csv, bars, time_as="iso")
+    out = tprov.csv_export_to_raw(csv, REGISTRY[SYM], when=dt.date(2026, 9, 17))
+    assert json.loads(out.read_text())["bars"][0]["t"] == bars[0]["t"]
+    (tmp_path / "bad.csv").write_text("date,close\n2026-09-16,32.23\n")
+    with pytest.raises(tprov.RawError, match="needs columns"):
+        tprov.csv_export_to_raw(tmp_path / "bad.csv", REGISTRY[SYM])
+
+
+def test_cli_csv_import_needs_exactly_one_symbol_and_then_builds(tmp_store, tmp_path, capsys):
+    csv = tmp_path / "ncfd.csv"
+    _export_csv(csv, payload()["bars"])
+    with pytest.raises(SystemExit):
+        update.main(["--tradingview-csv", str(csv)])
+    with pytest.raises(SystemExit):
+        update.main(["--tradingview-csv", str(csv), "--symbols", SYM, "SPX_FOMO_5D"])
+    assert update.main(["--tradingview-csv", str(csv), "--symbols", SYM]) == 0
+    assert "csv-export.json" in capsys.readouterr().out
+    assert update.main(["--build-tradingview", "--symbols", SYM,
+                        "--expect-session", "none"]) == 0
+    assert len(stored()) == 10

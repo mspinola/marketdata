@@ -107,6 +107,12 @@ def main(argv=None) -> int:
                         "newest bar is older than the expected session is refused with "
                         "a non-zero exit and nothing written (the scheduled retry is the "
                         "second routine).")
+    p.add_argument("--tradingview-csv", metavar="PATH",
+                   help="series domain backfill: convert one TradingView chart export "
+                        "(Export chart data, CSV) for the ONE symbol named by --symbols "
+                        "into a raw file in the connector's shape, so the same "
+                        "--build-tradingview guards apply. No network. Run the build "
+                        "afterwards (--expect-session none for an old export).")
     p.add_argument("--expect-session", metavar="YYYY-MM-DD|none",
                    help="with --build-tradingview: the session the raw files must reach. "
                         "Default: the latest weekday whose 16:30 ET close has passed. "
@@ -133,10 +139,14 @@ def main(argv=None) -> int:
 
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
-            or args.reconcile_databento or args.build_tradingview):
+            or args.reconcile_databento or args.build_tradingview
+            or args.tradingview_csv):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
-                "--reconcile-databento or --build-tradingview")
+                "--reconcile-databento, --build-tradingview or --tradingview-csv")
+    if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
+        p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
+                "--symbols entry, the internal name the export belongs to.")
 
     # The series domain has no fetch: its producer is a Claude routine writing raw
     # files, and --build-tradingview turns those into the store. `--bars --domain
@@ -315,6 +325,22 @@ def main(argv=None) -> int:
     if args.build_databento:
         from .providers import databento as dprov
         results.append(dprov.build(args.symbols))
+
+    if args.tradingview_csv:
+        from .providers import tradingview as tprov
+        from .registry import REGISTRY
+        sym = REGISTRY[args.symbols[0]]
+        if sym.domain != "series" or not sym.tradingview:
+            p.error(f"{sym.internal} is not a TradingView series symbol.")
+        try:
+            out = tprov.csv_export_to_raw(args.tradingview_csv, sym)
+        except tprov.RawError as e:
+            print(f"REFUSED -- {e}")
+            return 1
+        print(f"{sym.internal}: wrote {out} from {args.tradingview_csv}. Now run "
+              f"--build-tradingview (with --expect-session none if the export is old).")
+        if not args.build_tradingview:
+            return 0
 
     if args.build_tradingview:
         from .providers import tradingview as tprov
