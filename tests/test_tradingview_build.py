@@ -170,19 +170,54 @@ def test_not_json_is_refused(raw):
     assert not res["ok"] and "not readable as JSON" in res["errors"][0][1]
 
 
-def test_count_and_ratio_kinds_have_their_own_ranges(raw, monkeypatch):
+def _typed(kind):
     sym = REGISTRY[SYM]
+    return sym.__class__(**{**sym.__dict__, "kind": kind, "anchors": ()})
+
+
+def _as_ratio(d):
+    d["bars"] = [{**b, **{k: b[k] / 100 for k in "ohlc"}} for b in d["bars"]]
+    return d
+
+
+def test_count_and_ratio_kinds_have_their_own_ranges(raw):
     for kind, value, why in [("count", 46.5, "not a whole number"),
-                             ("ratio", 0.0, "not positive"),
                              ("ratio", 12.0, "outside the ratio range")]:
-        typed = sym.__class__(**{**sym.__dict__, "kind": kind, "anchors": ()})
         d = payload()
-        if kind == "ratio":     # the fixture is a percent series; scale it into range
-            d["bars"] = [{**b, **{k: b[k] / 100 for k in "ohlc"}} for b in d["bars"]]
+        if kind == "ratio":
+            _as_ratio(d)
         d["bars"][2]["c"] = value
         write(raw, "2026-09-16.json", d)
         with pytest.raises(tprov.RawError, match=why):
-            tprov.parse_raw(raw / SYM / "2026-09-16.json", typed)
+            tprov.parse_raw(raw / SYM / "2026-09-16.json", _typed(kind))
+
+
+def test_a_count_of_0_01_is_the_vendors_zero_and_is_stored_as_zero(raw):
+    # Measured: INDEX:HIGQ printed 0.01 on 2020-03-13, INDEX:LOWN on 65 days.
+    d = payload()
+    d["bars"] = [{**b, **{k: float(round(b[k])) for k in "ohlc"}} for b in d["bars"]]
+    d["bars"][5] = {**d["bars"][5], "o": 0.01, "h": 0.01, "l": 0.01, "c": 0.01}
+    write(raw, "2026-09-16.json", d)
+    df = tprov.parse_raw(raw / SYM / "2026-09-16.json", _typed("count"))
+    assert df.iloc[5]["Close"] == 0.0 and df.iloc[5]["High"] == 0.0
+    assert len(df) == 10
+
+
+def test_a_ratio_bar_with_a_zero_close_is_a_vendor_hole_dropped_and_named(raw, capsys):
+    # Measured: USI:PCCE on 2026-06-18 and 2026-07-02, real open and high, zero low
+    # and close.
+    d = _as_ratio(payload())
+    d["bars"][3] = {**d["bars"][3], "l": 0.0, "c": 0.0}
+    write(raw, "2026-09-16.json", d)
+    df = tprov.parse_raw(raw / SYM / "2026-09-16.json", _typed("ratio"))
+    assert len(df) == 9 and pd.Timestamp("2026-09-08") not in df.index
+    assert "dropped 1 bar(s) with a zero close" in capsys.readouterr().out
+    # A hole is dropped, but a zero open beside a positive close is still refused.
+    d = _as_ratio(payload())
+    d["bars"][3] = {**d["bars"][3], "o": 0.0}
+    write(raw, "2026-09-16.json", d)
+    with pytest.raises(tprov.RawError, match="non-positive open"):
+        tprov.parse_raw(raw / SYM / "2026-09-16.json", _typed("ratio"))
 
 
 def test_a_symbol_with_no_raw_files_is_a_failed_run(tmp_store):
