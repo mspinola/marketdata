@@ -45,6 +45,10 @@ Equity Index ETF:
   IWM:
     yahoo: "IWM"
     inception: "2000-05-22"
+  DIA:
+    yahoo: "DIA"
+    inception: "1998-01-14"
+    note: "SPDR Dow Jones Industrial Average. Index row on cot-analyzer's market internals page (/internals); no ratio leg."
 
 # The MSCI international indices are the one place a COT market is priced off an ETF
 # rather than its own futures. MFS and MME have ICE futures that Norgate does not carry
@@ -77,6 +81,10 @@ Commodity ETF:
   GLD:
     yahoo: "GLD"
     inception: "2004-11-18"
+  USO:
+    yahoo: "USO"
+    inception: "2006-04-10"
+    note: "United States Oil Fund. Asset row on cot-analyzer's market internals page; a futures-holding fund whose price series is NOT a proxy for CL (roll yield), so nothing prices a COT market off it."
 
 # The tape-context set: four ratios cot-analyzer scores on the crowd board's own
 # windows beside COT positioning (docs/design/breadth-domain-scoping.md). Each new
@@ -103,11 +111,23 @@ Credit ETF:
     yahoo: "HYG"
     inception: "2007-04-04"
     note: "iShares iBoxx $ High Yield Corporate Bond. HYG/IEF is credit appetite; total tier only, both legs distribute monthly."
+  JNK:
+    yahoo: "JNK"
+    inception: "2007-11-28"
+    note: "SPDR Bloomberg High Yield Bond. The credit read on cot-analyzer's market internals page: the PRICE (split tier) against its own 20-day average, so a monthly distribution does not sit in both. Not a second leg of HYG/IEF."
 
 Broad Bond ETF:
   AGG:
     yahoo: "AGG"
     inception: "2003-09-22"
+
+# Not "Crypto": that class name maps to the FUTURES domain in registry._CLASS_DOMAIN
+# (BTC, ETH), and an ETF under it would be fetched as a Norgate continuous contract.
+Crypto ETF:
+  IBIT:
+    yahoo: "IBIT"
+    inception: "2024-01-11"
+    note: "iShares Bitcoin Trust. Asset row on cot-analyzer's market internals page. Spot bitcoin, not the CME future; nothing prices BTC's COT off it."
 
 # KEPT DELIBERATELY. These four have been removed twice, on 2026-07-xx and again on
 # 2026-08-21, both times on the belief that nothing used them. Something does:
@@ -301,6 +321,34 @@ Market Breadth:
     kind: count
     inception: "2006-09-29"
     note: "NYSE stocks at a new 52-week low, daily count. `inception` is a 5000-bar cap."
+  NASDAQ_ADV:
+    tradingview: "USI:ADVQ"
+    kind: count
+    inception: "2006-10-31"
+    anchors:
+      "2026-09-16": 1949
+    note: "Nasdaq issues advancing on the session, daily count. With NASDAQ_DEC it is the advancing-share read on cot-analyzer's market internals page. `inception` is a 5000-bar cap. The declining symbol is DECLQ, not DECQ: DECQ does not resolve (checked 2026-09-17)."
+  NASDAQ_DEC:
+    tradingview: "USI:DECLQ"
+    kind: count
+    inception: "2006-10-31"
+    anchors:
+      "2026-09-16": 2907
+    note: "Nasdaq issues declining on the session, daily count. `inception` is a 5000-bar cap."
+  NYSE_ADV:
+    tradingview: "USI:ADV"
+    kind: count
+    inception: "2006-10-31"
+    anchors:
+      "2026-09-16": 1065
+    note: "NYSE issues advancing on the session, daily count. ADV, not ADVN: ADVN does not resolve (checked 2026-09-17). `inception` is a 5000-bar cap."
+  NYSE_DEC:
+    tradingview: "USI:DECL"
+    kind: count
+    inception: "2006-10-31"
+    anchors:
+      "2026-09-16": 1633
+    note: "NYSE issues declining on the session, daily count. `inception` is a 5000-bar cap."
 
 Options Sentiment:
   CBOE_PCC:
