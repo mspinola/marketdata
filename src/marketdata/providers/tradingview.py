@@ -36,12 +36,14 @@ bar:
   * Shape and range. Timestamps strictly increasing, one per session; the registry
     `kind` fixes the range (percent 0-100, count a non-negative integer, ratio in
     (0, 10]).
-  * Session gate. The newest bar across the raw files and the store must reach the
-    expected session (the latest weekday whose 16:30 ET close has passed), else the
-    symbol is refused as stale with nothing written. The scheduled retry is the
-    routine's second run. Exchange holidays are not modelled: on one the evening
-    build refuses and the next session's build carries both days, which is inside
-    the freshness tolerance the verifier applies.
+  * Session gate, both sides. The newest bar across the raw files and the store must
+    be exactly the expected session (the latest weekday whose 16:30 ET close has
+    passed). Older is refused as stale, and the scheduled retry is the routine's
+    second run. Newer is refused as unsettled: a routine that fires before the close
+    gets the day in progress, whose Close still moves, and a bar stored once is never
+    rewritten. Neither side writes anything. Exchange holidays are not modelled: on
+    one the evening build refuses and the next session's build carries both days,
+    which is inside the freshness tolerance the verifier applies.
   * Pinned anchors. Registry `anchors` (a published reading on a date) are
     re-verified on every build whose input or output holds those dates. The
     standing proof that the vendor's symbol string still names the same series.
@@ -291,14 +293,17 @@ def check_anchors(df: pd.DataFrame, sym: Symbol, what: str) -> None:
 
 
 def merge_raw(sym: Symbol, files: Iterable[Path], *,
-              accept: bool = False) -> pd.DataFrame:
+              accept: bool = False, log: Optional[list] = None) -> pd.DataFrame:
     """The union of a symbol's raw files, refusing any bar two files disagree on.
 
     `accept` takes the LATER file's close instead of refusing, which is what
     "accept the vendor's restatement" means at this stage: files are read oldest
     first, so the later one is the newer pull and therefore the vendor's current
-    statement. Every change is printed. Only an operator naming the symbol turns
-    this on; see `build`.
+    statement. Only an operator naming the symbol turns this on; see `build`.
+
+    Changes are appended to `log` rather than printed, because a later guard can
+    still refuse the symbol and write nothing: printing here announced an overwrite
+    that a session-gate refusal then never performed.
     """
     merged = None
     for path in files:
@@ -323,8 +328,9 @@ def merge_raw(sym: Symbol, files: Iterable[Path], *,
                         f"and it is not a mis-transcription, --accept-restatement "
                         f"{sym.internal} takes the newer file's value.")
                 for day, old, now in zip(common[bad], a[bad], b[bad]):
-                    print(f"  ACCEPTED {sym.internal} {day.date()}: raw {old:g} -> "
-                          f"{now:g} (from {path.name}, the newer pull)")
+                    (log if log is not None else []).append(
+                        f"  ACCEPTED {sym.internal} {day.date()}: raw {old:g} -> "
+                        f"{now:g} (from {path.name}, the newer pull)")
                 merged.loc[common[bad], "Close"] = b[bad]
         merged = pd.concat([merged, df.loc[df.index.difference(merged.index)]]).sort_index()
     if merged is None:
@@ -350,7 +356,11 @@ def build_symbol(sym: Symbol, expect, *, accept: bool = False) -> int:
 
     `expect` is the session the data must reach (a Timestamp), or `NO_GATE`.
     """
-    merged = merge_raw(sym, raw_files(sym.internal), accept=accept)
+    # Accepted-overwrite lines are held until the write actually happens: the
+    # session gate below can still refuse the symbol, and an ACCEPTED line above a
+    # refusal reads as history having been rewritten when nothing was touched.
+    pending: list = []
+    merged = merge_raw(sym, raw_files(sym.internal), accept=accept, log=pending)
     restated = 0
     stored = store.read_bars(sym.internal, DOMAIN, NAME)
     if not stored.empty:
@@ -377,8 +387,9 @@ def build_symbol(sym: Symbol, expect, *, accept: bool = False) -> int:
             # Loud by the bar, because a silent overwrite is the failure mode the
             # refusal exists to prevent.
             for day, old, now in zip(common[bad], a[bad], b[bad]):
-                print(f"  ACCEPTED {sym.internal} {day.date()}: store {old:g} -> "
-                      f"{now:g} (the vendor's current close)")
+                pending.append(
+                    f"  ACCEPTED {sym.internal} {day.date()}: store {old:g} -> "
+                    f"{now:g} (the vendor's current close)")
             out.loc[common[bad], list(OHLC)] = merged.loc[common[bad], list(OHLC)].to_numpy()
             restated = int(bad.sum())
     else:
@@ -386,14 +397,30 @@ def build_symbol(sym: Symbol, expect, *, accept: bool = False) -> int:
         out = merged
     out.index.name = "Date"
     newest = out.index.max()
-    if expect != NO_GATE and newest < pd.Timestamp(expect):
-        raise RawError(
-            f"{sym.internal}: newest bar is {newest.date()}, the expected session is "
-            f"{pd.Timestamp(expect).date()}. Stale; nothing written. The routine's "
-            f"later run is the retry.")
+    # The gate has two sides, and neither writes anything. TOO OLD is a pull that
+    # has not landed yet, and the routine's later run is the retry. TOO NEW is a
+    # bar whose session has not closed: asked before 16:30 ET the vendor serves
+    # the day in progress, and on some symbols (the put/call ratios) it serves it
+    # a whole bar ahead of the breadth counts. Its Close still moves, and since
+    # the build never rewrites a stored bar, storing it once would refuse every
+    # later build of that session until a human cleaned the store by hand.
+    if expect != NO_GATE:
+        want = pd.Timestamp(expect)
+        if newest < want:
+            raise RawError(
+                f"{sym.internal}: newest bar is {newest.date()}, the expected session is "
+                f"{want.date()}. Stale; nothing written. The routine's "
+                f"later run is the retry.")
+        if newest > want:
+            raise RawError(
+                f"{sym.internal}: newest bar is {newest.date()}, past the expected "
+                f"session {want.date()}. That session has not closed, so the bar is "
+                f"still moving; nothing written. Pull again after 16:30 ET.")
     check_anchors(out, sym, sym.internal)
     if new.empty and not restated:
         return 0
+    for line in pending:
+        print(line)
     store.write_bars(sym.internal, out.astype(float), domain=DOMAIN, source=NAME)
     return int(len(new))
 

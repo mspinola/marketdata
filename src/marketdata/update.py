@@ -121,9 +121,10 @@ def main(argv=None) -> int:
                         "(else _raw/tradingview under the store). Appends only bars the "
                         "store lacks; every bar that overlaps the store must match it "
                         "exactly, registry anchors are re-verified, and a raw file whose "
-                        "newest bar is older than the expected session is refused with "
-                        "a non-zero exit and nothing written (the scheduled retry is the "
-                        "second routine).")
+                        "newest bar misses the expected session is refused with a "
+                        "non-zero exit and nothing written -- older is stale (the "
+                        "scheduled retry is the second routine), newer is a session "
+                        "still open, whose bar is still moving.")
     p.add_argument("--tradingview-csv", metavar="PATH",
                    help="series domain backfill: convert one TradingView chart export "
                         "(Export chart data, CSV) for the ONE symbol named by --symbols "
@@ -131,9 +132,10 @@ def main(argv=None) -> int:
                         "--build-tradingview guards apply. No network. Run the build "
                         "afterwards (--expect-session none for an old export).")
     p.add_argument("--expect-session", metavar="YYYY-MM-DD|none",
-                   help="with --build-tradingview: the session the raw files must reach. "
-                        "Default: the latest weekday whose 16:30 ET close has passed. "
-                        "'none' disables the gate, for a build of old raw files.")
+                   help="with --build-tradingview: the session the raw files must reach "
+                        "and must not pass. Default: the latest weekday whose 16:30 ET "
+                        "close has passed. Older is refused as stale, newer as a session "
+                        "still open. 'none' disables the gate, for a build of old raw files.")
     p.add_argument("--symbols", nargs="+", metavar="SYM",
                    help="scope the fetch to these internal symbols")
     p.add_argument("--check", action="store_true",

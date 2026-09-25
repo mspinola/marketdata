@@ -238,6 +238,28 @@ def test_stale_raw_files_are_refused_with_nothing_written(raw):
     assert stored().empty
 
 
+def test_a_bar_past_the_expected_session_is_refused_with_nothing_written(raw):
+    res = tprov.build([SYM], expect_session="2026-09-15")
+    assert not res["ok"] and res["failed"] == 1 and res["wrote"] == 0
+    err = res["errors"][0][1]
+    assert "2026-09-16" in err and "past the expected session" in err
+    assert stored().empty
+
+
+def test_the_default_gate_refuses_the_session_still_in_progress(raw, monkeypatch):
+    """The routine firing before the close, which is how this side was found: at
+    13:45 ET the connector serves the day in progress, and on the put/call ratios it
+    serves it a bar ahead of the breadth counts. The Close still moves, and the store
+    is never rewritten, so a bar stored then refuses every later build of that
+    session until a human clears it."""
+    midday = dt.datetime(2026, 9, 16, 13, 45, tzinfo=ET)
+    assert tprov.expected_session(midday) == pd.Timestamp("2026-09-15")
+    monkeypatch.setattr(tprov, "expected_session", lambda now=None: pd.Timestamp("2026-09-15"))
+    res = tprov.build([SYM])
+    assert not res["ok"] and "still moving" in res["errors"][0][1]
+    assert stored().empty
+
+
 def test_the_gate_can_be_switched_off_for_old_files(raw):
     assert tprov.build([SYM], expect_session=tprov.NO_GATE)["ok"]
 
@@ -458,6 +480,26 @@ def test_accepting_still_checks_the_anchors(raw, capsys):
     assert rc == 1
     assert "anchor" in out.lower() and "REFUSED" in out
     assert "ACCEPTED" not in out
+
+
+def test_a_refusal_after_an_accepted_bar_announces_nothing(raw, capsys):
+    """An ACCEPTED line above a refusal reads as history having been rewritten when
+    nothing was touched. The live shape: the restatement is accepted in the merge,
+    then the session gate refuses the symbol because the newest bar's session has
+    not closed, and the store is never opened."""
+    assert update.main(["--build-tradingview", "--symbols", SYM,
+                        "--expect-session", "2026-09-16"]) == 0
+    before = stored()["Close"].copy()
+    capsys.readouterr()
+    _restate(raw, 41.0)
+    # A gate the newest bar is PAST, so the symbol refuses after the accept.
+    rc = update.main(["--build-tradingview", "--symbols", SYM,
+                      "--expect-session", "2026-09-15", "--accept-restatement", SYM])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "past the expected session" in out
+    assert "ACCEPTED" not in out
+    assert stored()["Close"].equals(before)
 
 
 def test_the_flag_is_refused_without_the_build_or_with_an_unknown_symbol(tmp_store):
