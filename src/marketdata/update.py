@@ -106,6 +106,14 @@ def main(argv=None) -> int:
                         "entries whose file is missing (so a restart does not skip them "
                         "as 'already current' and leave a silent hole in paid data). "
                         "Local files only, no API. Exits after.")
+    p.add_argument("--accept-restatement", nargs="+", metavar="SYM", default=None,
+                   help="with --build-tradingview: let these series symbols OVERWRITE "
+                        "stored bars with the raw value, resolving a vendor "
+                        "restatement. Names symbols explicitly and never all of them: "
+                        "the overlap check catches a vendor restatement and a "
+                        "mis-transcription with the same message, and only a person "
+                        "who has compared the raw file with the vendor can say which "
+                        "it is. Every changed bar is printed, old value and new.")
     p.add_argument("--build-tradingview", action="store_true",
                    help="series domain, no network: build the TradingView breadth and "
                         "sentiment series from the raw JSON a Claude routine on the "
@@ -166,6 +174,17 @@ def main(argv=None) -> int:
     if args.expect_session and not args.build_tradingview:
         p.error("--expect-session gates the TradingView build. Pass it with "
                 "--build-tradingview.")
+    if args.accept_restatement is not None:
+        if not args.build_tradingview:
+            p.error("--accept-restatement resolves a TradingView build refusal. Pass "
+                    "it with --build-tradingview.")
+        from .registry import REGISTRY
+        unknown = [s for s in args.accept_restatement
+                   if s not in REGISTRY or REGISTRY[s].domain != "series"]
+        if unknown:
+            p.error(f"--accept-restatement takes series symbols; the registry has no "
+                    f"series entry for {unknown}. Overwriting stored history is not a "
+                    f"thing to do to a symbol named by a typo.")
 
     # Refuse a gate that cannot gate anything, rather than accepting the flag and
     # doing nothing with it: a scheduled task that silently ignores --require-final
@@ -356,7 +375,8 @@ def main(argv=None) -> int:
         expect = args.expect_session
         if expect is not None and expect.lower() == "none":
             expect = tprov.NO_GATE
-        results.append(tprov.build(args.symbols, expect_session=expect))
+        results.append(tprov.build(args.symbols, expect_session=expect,
+                                   accept_restatement=args.accept_restatement))
 
     for res in results:
         print(f"\n{res['kind']}: wrote={res.get('wrote', res.get('rows', 0))} "

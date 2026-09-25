@@ -374,6 +374,102 @@ def test_the_partial_flag_is_on_the_result_dict(raw):
     assert other
 
 
+# ── accepting a vendor restatement ──────────────────────────────────────────
+#
+# The 2026-09-25 case: TradingView restated two put/call closes after the
+# backfill, so the raw files disagreed with each other AND with the store. The
+# refusal is right by default -- a restatement and a mis-transcription look
+# identical in the file -- so accepting is a named, per-symbol act.
+
+#: The fixture's LAST bar is the registry anchor, so restating it trips the anchor
+#: check before the overlap one. The bar before it is an ordinary bar.
+RESTATED_DAY = "2026-09-15"
+
+
+def _restate(raw, new_close, sym=SYM, day_index=-2):
+    """A newer raw file that restates one bar, the vendor's own behaviour.
+    Returns the close it replaced."""
+    d = payload(symbol=REGISTRY[sym].tradingview)
+    was = float(d["bars"][day_index]["c"])
+    d["bars"][day_index]["c"] = new_close
+    write(raw, "2026-09-17.json", d, sym=sym)
+    return was
+
+
+def test_a_restatement_refuses_by_default_and_the_message_names_the_way_out(raw, capsys):
+    assert update.main(["--build-tradingview", "--symbols", SYM,
+                        "--expect-session", "2026-09-16"]) == 0
+    capsys.readouterr()
+    _restate(raw, 41.0)
+    assert update.main(["--build-tradingview", "--symbols", SYM,
+                        "--expect-session", "2026-09-16"]) == 1
+    out = capsys.readouterr().out
+    assert "REFUSED" in out and RESTATED_DAY in out
+    assert f"--accept-restatement {SYM}" in out
+
+
+def test_accepting_overwrites_the_stored_bar_and_prints_both_values(raw, capsys):
+    assert update.main(["--build-tradingview", "--symbols", SYM,
+                        "--expect-session", "2026-09-16"]) == 0
+    capsys.readouterr()
+    was = _restate(raw, 41.0)
+
+    rc = update.main(["--build-tradingview", "--symbols", SYM,
+                      "--expect-session", "2026-09-16",
+                      "--accept-restatement", SYM])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert float(stored()["Close"].loc[RESTATED_DAY]) == 41.0 != was
+    assert "ACCEPTED" in out and f"{was:g}" in out and "41" in out
+    # The row count is unchanged: a restatement replaces a bar, never appends one.
+    assert len(stored()) == 10
+
+
+def test_accepting_is_scoped_to_the_named_symbol(raw, capsys):
+    other = _second_symbol(raw)
+    both = ["--symbols", SYM, other]
+    assert update.main(["--build-tradingview", *both,
+                        "--expect-session", "2026-09-16"]) == 0
+    capsys.readouterr()
+    # Both symbols restate the same bar; only one is named.
+    _restate(raw, 41.0)
+    _restate(raw, 41.0, sym=other)
+
+    rc = update.main(["--build-tradingview", *both, "--expect-session", "2026-09-16",
+                      "--accept-restatement", SYM])
+    out = capsys.readouterr().out
+    assert rc == update.EXIT_PARTIAL
+    assert float(stored()["Close"].loc[RESTATED_DAY]) == 41.0
+    assert f"{other}: REFUSED" in out
+    untouched = store.read_bars(other, "series", "tradingview")
+    assert float(untouched["Close"].loc[RESTATED_DAY]) != 41.0
+
+
+def test_accepting_still_checks_the_anchors(raw, capsys):
+    """Accepting a restatement is not a way past the proof that the vendor symbol
+    still names the same series. The fixture's last bar IS the registry anchor."""
+    assert update.main(["--build-tradingview", "--symbols", SYM,
+                        "--expect-session", "2026-09-16"]) == 0
+    capsys.readouterr()
+    _restate(raw, 41.0, day_index=-1)     # the anchor bar itself
+    rc = update.main(["--build-tradingview", "--symbols", SYM,
+                      "--expect-session", "2026-09-16", "--accept-restatement", SYM])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "anchor" in out.lower() and "REFUSED" in out
+    assert "ACCEPTED" not in out
+
+
+def test_the_flag_is_refused_without_the_build_or_with_an_unknown_symbol(tmp_store):
+    with pytest.raises(SystemExit):
+        update.main(["--check", "--accept-restatement", SYM])
+    with pytest.raises(SystemExit):
+        update.main(["--build-tradingview", "--accept-restatement", "NOT_A_SYMBOL"])
+    with pytest.raises(SystemExit):
+        # An equities symbol is not a series symbol.
+        update.main(["--build-tradingview", "--accept-restatement", "SPY"])
+
+
 def test_cli_refuses_bars_on_the_series_domain_and_a_stray_gate_flag(tmp_store):
     with pytest.raises(SystemExit):
         update.main(["--bars", "--domain", "series"])
