@@ -7,3 +7,8 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+
+# uv artifacts. marketdata installs with `uv pip install -e .`, the pip-compatible
+# interface, so uv.lock is never read here: a stray one is left by anyone running
+# `uv lock` or `uv sync` in the checkout. The dependency record is requirements.lock.
+uv.lock

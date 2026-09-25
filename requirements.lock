@@ -1,0 +1,45 @@
+# Resolved dependency set for a working Python 3.11 install of
+#   uv venv --python 3.11 && uv pip install -e ".[yahoo,dev]" "setuptools<81"
+# which is the README's install line. Third-party only; the editable install of
+# this package itself is left out, matching npf and cot-analyzer's locks.
+#
+# This is a RECORD, not an input: nothing installs from it and no CI step checks
+# it, again as in those two repos. It exists so a machine that resolves something
+# different has something to be compared against -- the producer box runs this
+# package unattended and resolves its own venv, and until now there was nothing
+# to diff it with. Regenerate after a dependency change with:
+#   uv pip freeze | grep -v '^-e\|@ file://\|^crucible-marketdata\|^marketdata==' | sort
+beautifulsoup4==4.15.0
+certifi==2026.7.22
+cffi==2.1.0
+charset-normalizer==3.4.9
+curl-cffi==0.15.0
+idna==3.18
+iniconfig==2.3.0
+markdown-it-py==4.2.0
+mdurl==0.1.2
+multitasking==0.0.13
+numpy==2.4.6
+packaging==26.2
+pandas==3.0.5
+peewee==4.2.6
+platformdirs==4.11.0
+pluggy==1.6.0
+protobuf==7.35.1
+pyarrow==25.0.0
+pycparser==3.0
+pygments==2.20.0
+pytest==9.1.1
+python-dateutil==2.9.0.post0
+pytz==2026.3.post1
+pyyaml==6.0.3
+requests==2.34.2
+rich==15.0.0
+ruff==0.15.22
+setuptools==80.10.2
+six==1.17.0
+soupsieve==2.9.1
+typing-extensions==4.16.0
+urllib3==2.7.0
+websockets==16.1.1
+yfinance==1.5.2
