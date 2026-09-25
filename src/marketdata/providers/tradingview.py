@@ -373,14 +373,29 @@ def build_symbol(sym: Symbol, expect) -> int:
 def build(symbols: Optional[Iterable[str]] = None, *, expect_session=None) -> dict:
     """Stage 2 for every registry series symbol that resolves to TradingView (scope
     with `symbols`). Local files only. Returns the producer result dict the CLI
-    prints: ``{kind, ok, wrote, failed, errors}``; `ok` is False on any refusal,
-    and a symbol with no raw files at all is a refusal, because the routine pulls
-    every registry series symbol every night and a missing one means it did not.
+    prints: ``{kind, ok, partial, wrote, failed, errors}``; `ok` is False on any
+    refusal, and a symbol with no raw files at all is a refusal, because the
+    routine pulls every registry series symbol every night and a missing one
+    means it did not.
+
+    ``partial`` is True when SOME symbols refused and others did not. It exists
+    for the wrapper, which must tell two situations apart that both used to be
+    "exit non-zero": every symbol refused, where there is nothing to deliver and
+    the later routine is the retry; and a couple refused while the rest landed in
+    the store, where withholding the replica sync punishes the symbols that
+    worked. That second case froze the whole domain on 2026-09-25 -- the vendor
+    restated two put/call closes, the build refused those two by design, the
+    wrapper exited on the non-zero code before its syncs, and thirteen breadth
+    series sat correct on the producer and stale on both replicas until someone
+    looked. A refusal must stop the symbol, not the delivery.
+
+    A symbol that was already current counts as succeeding: the question the flag
+    answers is whether every symbol refused, not whether this run wrote rows.
     """
     targets = _targets(symbols)
     if not targets:
-        return {"kind": "series_tradingview", "ok": True, "wrote": 0, "failed": 0,
-                "errors": []}
+        return {"kind": "series_tradingview", "ok": True, "partial": False,
+                "wrote": 0, "failed": 0, "errors": []}
     expect = expected_session() if expect_session is None else (
         NO_GATE if expect_session == NO_GATE else pd.Timestamp(expect_session))
     wrote = failed = 0
@@ -398,5 +413,6 @@ def build(symbols: Optional[Iterable[str]] = None, *, expect_session=None) -> di
             print(f"{s.internal}: +{n} bar(s) ({s.tradingview}) -> store")
         else:
             print(f"{s.internal}: already current ({s.tradingview})")
-    return {"kind": "series_tradingview", "ok": failed == 0, "wrote": wrote,
+    return {"kind": "series_tradingview", "ok": failed == 0,
+            "partial": 0 < failed < len(targets), "wrote": wrote,
             "failed": failed, "errors": errors}

@@ -6,6 +6,15 @@ import sys
 
 from . import config, store
 
+#: Exit code for a run where SOME targets refused and others did not. Distinct
+#: from 1 so a wrapper can deliver what landed while a human resolves the rest.
+#: 1 stays "nothing usable came of this run" (every target refused, a defer, or a
+#: hard error) and 0 stays "nothing refused". The case that forced the split is in
+#: providers/tradingview.build's docstring: two restated put/call closes refused by
+#: design, and thirteen good breadth series held off both replicas because the
+#: wrapper saw one non-zero code and exited before its syncs.
+EXIT_PARTIAL = 2
+
 
 def _check() -> int:
     m = store.load_manifest()
@@ -360,7 +369,17 @@ def main(argv=None) -> int:
     # no-session day is the harmless case, not the failure.
     if deferred:
         return 1
-    return 0 if all(r["ok"] for r in results) else 1
+    if all(r["ok"] for r in results):
+        return 0
+    # Some refused and some did not: the store holds correct bars for everything
+    # that did not refuse, and a wrapper must still deliver them. See EXIT_PARTIAL.
+    if results and all(r["ok"] or r.get("partial") for r in results):
+        print(f"\nPARTIAL (exit {EXIT_PARTIAL}): every symbol above that did not "
+              f"refuse is in the store and is correct. A wrapper must still run its "
+              f"replica syncs on this code; withholding them punishes the symbols "
+              f"that worked for the ones that did not.")
+        return EXIT_PARTIAL
+    return 1
 
 
 if __name__ == "__main__":
