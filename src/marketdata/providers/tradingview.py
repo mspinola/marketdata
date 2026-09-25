@@ -290,8 +290,16 @@ def check_anchors(df: pd.DataFrame, sym: Symbol, what: str) -> None:
                                f"name the same series; do not build until resolved.")
 
 
-def merge_raw(sym: Symbol, files: Iterable[Path]) -> pd.DataFrame:
-    """The union of a symbol's raw files, refusing any bar two files disagree on."""
+def merge_raw(sym: Symbol, files: Iterable[Path], *,
+              accept: bool = False) -> pd.DataFrame:
+    """The union of a symbol's raw files, refusing any bar two files disagree on.
+
+    `accept` takes the LATER file's close instead of refusing, which is what
+    "accept the vendor's restatement" means at this stage: files are read oldest
+    first, so the later one is the newer pull and therefore the vendor's current
+    statement. Every change is printed. Only an operator naming the symbol turns
+    this on; see `build`.
+    """
     merged = None
     for path in files:
         df = parse_raw(path, sym)
@@ -305,10 +313,19 @@ def merge_raw(sym: Symbol, files: Iterable[Path]) -> pd.DataFrame:
             b = df.loc[common, "Close"].to_numpy()
             bad = ~np.isclose(a, b, rtol=0, atol=1e-9)
             if bad.any():
-                d = common[bad][0].date()
-                raise RawError(f"{path.name}: session {d} closes at "
-                               f"{b[bad][0]:g} here and {a[bad][0]:g} in an earlier "
-                               f"raw file for {sym.internal}")
+                if not accept:
+                    d = common[bad][0].date()
+                    raise RawError(
+                        f"{path.name}: session {d} closes at {b[bad][0]:g} here and "
+                        f"{a[bad][0]:g} in an earlier raw file for {sym.internal}. This "
+                        f"is the guard a vendor restatement trips FIRST, before the "
+                        f"store comparison. Once you have checked it against the vendor "
+                        f"and it is not a mis-transcription, --accept-restatement "
+                        f"{sym.internal} takes the newer file's value.")
+                for day, old, now in zip(common[bad], a[bad], b[bad]):
+                    print(f"  ACCEPTED {sym.internal} {day.date()}: raw {old:g} -> "
+                          f"{now:g} (from {path.name}, the newer pull)")
+                merged.loc[common[bad], "Close"] = b[bad]
         merged = pd.concat([merged, df.loc[df.index.difference(merged.index)]]).sort_index()
     if merged is None:
         raise RawError(f"{sym.internal}: no raw files under {raw_root() / sym.internal}")
@@ -325,7 +342,7 @@ def _targets(symbols: Optional[Iterable[str]] = None) -> list:
             and (wanted is None or s.internal in wanted)]
 
 
-def build_symbol(sym: Symbol, expect) -> int:
+def build_symbol(sym: Symbol, expect, *, accept: bool = False) -> int:
     """Validate a symbol's raw files against each other, the store and the
     registry, then append the bars the store lacks. Returns rows written, which
     is 0 when the store already holds everything. Raises `RawError` and writes
@@ -333,7 +350,8 @@ def build_symbol(sym: Symbol, expect) -> int:
 
     `expect` is the session the data must reach (a Timestamp), or `NO_GATE`.
     """
-    merged = merge_raw(sym, raw_files(sym.internal))
+    merged = merge_raw(sym, raw_files(sym.internal), accept=accept)
+    restated = 0
     stored = store.read_bars(sym.internal, DOMAIN, NAME)
     if not stored.empty:
         stored = stored.copy()
@@ -344,15 +362,25 @@ def build_symbol(sym: Symbol, expect) -> int:
             a = stored.loc[common, "Close"].to_numpy(dtype=float)
             b = merged.loc[common, "Close"].to_numpy(dtype=float)
             bad = ~np.isclose(a, b, rtol=0, atol=1e-9)
-            if bad.any():
+            if bad.any() and not accept:
                 d = common[bad][0].date()
                 raise RawError(
                     f"{sym.internal}: session {d} closes at {b[bad][0]:g} in the raw "
                     f"files and {a[bad][0]:g} in the store. The store is never rewritten "
                     f"by a build; a vendor restatement or a transcription slip has to be "
-                    f"resolved by hand.")
+                    f"resolved by hand. Once you have decided it is the vendor, "
+                    f"--accept-restatement {sym.internal} takes the raw value.")
         new = merged.loc[merged.index.difference(stored.index)]
         out = pd.concat([stored[list(OHLC)], new]).sort_index()
+        if accept and len(common) and bad.any():
+            # Rewriting stored history, which nothing else in this producer does.
+            # Loud by the bar, because a silent overwrite is the failure mode the
+            # refusal exists to prevent.
+            for day, old, now in zip(common[bad], a[bad], b[bad]):
+                print(f"  ACCEPTED {sym.internal} {day.date()}: store {old:g} -> "
+                      f"{now:g} (the vendor's current close)")
+            out.loc[common[bad], list(OHLC)] = merged.loc[common[bad], list(OHLC)].to_numpy()
+            restated = int(bad.sum())
     else:
         new = merged
         out = merged
@@ -364,13 +392,14 @@ def build_symbol(sym: Symbol, expect) -> int:
             f"{pd.Timestamp(expect).date()}. Stale; nothing written. The routine's "
             f"later run is the retry.")
     check_anchors(out, sym, sym.internal)
-    if new.empty:
+    if new.empty and not restated:
         return 0
     store.write_bars(sym.internal, out.astype(float), domain=DOMAIN, source=NAME)
     return int(len(new))
 
 
-def build(symbols: Optional[Iterable[str]] = None, *, expect_session=None) -> dict:
+def build(symbols: Optional[Iterable[str]] = None, *, expect_session=None,
+          accept_restatement: Optional[Iterable[str]] = None) -> dict:
     """Stage 2 for every registry series symbol that resolves to TradingView (scope
     with `symbols`). Local files only. Returns the producer result dict the CLI
     prints: ``{kind, ok, partial, wrote, failed, errors}``; `ok` is False on any
@@ -391,6 +420,14 @@ def build(symbols: Optional[Iterable[str]] = None, *, expect_session=None) -> di
 
     A symbol that was already current counts as succeeding: the question the flag
     answers is whether every symbol refused, not whether this run wrote rows.
+
+    ``accept_restatement`` names the symbols allowed to overwrite stored bars with
+    the raw value, which is how a vendor restatement gets resolved. It is a LIST,
+    never a blanket switch, and the default is empty, because the overlap check
+    catches two different things that look identical in the file: the vendor
+    restating a close, and the routine's model mis-transcribing one. Only a person
+    who has compared the two can tell them apart, so the refusal stays the default
+    and accepting is a named, one-off act.
     """
     targets = _targets(symbols)
     if not targets:
@@ -398,11 +435,12 @@ def build(symbols: Optional[Iterable[str]] = None, *, expect_session=None) -> di
                 "wrote": 0, "failed": 0, "errors": []}
     expect = expected_session() if expect_session is None else (
         NO_GATE if expect_session == NO_GATE else pd.Timestamp(expect_session))
+    accept = set(accept_restatement or ())
     wrote = failed = 0
     errors = []
     for s in targets:
         try:
-            n = build_symbol(s, expect)
+            n = build_symbol(s, expect, accept=s.internal in accept)
         except RawError as e:
             print(f"{s.internal}: REFUSED -- {e}")
             failed += 1
