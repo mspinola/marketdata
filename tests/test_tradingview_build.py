@@ -227,8 +227,8 @@ def test_a_symbol_with_no_raw_files_is_a_failed_run(tmp_store):
 
 def test_scoping_to_a_non_series_symbol_is_a_no_op(tmp_store):
     res = tprov.build(["SPY"], expect_session=tprov.NO_GATE)
-    assert res == {"kind": "series_tradingview", "ok": True, "wrote": 0, "failed": 0,
-                   "errors": []}
+    assert res == {"kind": "series_tradingview", "ok": True, "partial": False,
+                   "wrote": 0, "failed": 0, "errors": []}
 
 
 # ── the session gate ────────────────────────────────────────────────────────
@@ -280,6 +280,98 @@ def test_cli_builds_and_exits_by_the_result(raw, capsys):
                         "--expect-session", "2026-09-17"]) == 1
     assert update.main(["--build-tradingview", "--symbols", SYM,
                         "--expect-session", "none"]) == 0
+
+
+# ── a partial refusal must not withhold the symbols that worked ─────────────
+#
+# The 2026-09-25 outage, as a test. TradingView restated two put/call closes, the
+# build refused those two exactly as designed, and because the only signal the
+# wrapper had was "non-zero" it exited before its replica syncs -- so thirteen
+# correct breadth series sat on the producer and stale on both replicas. The build
+# now says WHICH kind of non-zero it is.
+
+def _second_symbol(root):
+    """A second series symbol whose raw file is sound, beside SYM's. The payload
+    carries its OWN vendor symbol: the build checks the raw file's `symbol` against
+    the registry, so reusing the fixture verbatim refuses on that instead."""
+    other = "SPX_FOMO_5D"
+    write(root, "2026-09-16.json", payload(symbol=REGISTRY[other].tradingview),
+          sym=other)
+    return other
+
+
+def test_a_partial_refusal_exits_distinctly_from_a_total_one(raw, capsys):
+    """Some refused, some did not: EXIT_PARTIAL, and the message tells the wrapper
+    to sync anyway. The refused symbol is refused for a real reason (its raw file
+    disagrees with a bar the store already holds), which is the restatement case."""
+    other = _second_symbol(raw)
+    # Both land first.
+    both = ["--symbols", SYM, other]
+    assert update.main(["--build-tradingview", *both,
+                        "--expect-session", "2026-09-16"]) == 0
+    capsys.readouterr()
+    # Now SYM's raw file restates a stored close, exactly as the vendor did.
+    d = payload()
+    d["bars"][-1]["c"] = float(d["bars"][-1]["c"]) + 0.5
+    write(raw, "2026-09-17.json", d)
+
+    rc = update.main(["--build-tradingview", *both, "--expect-session", "2026-09-16"])
+    out = capsys.readouterr().out
+    assert rc == update.EXIT_PARTIAL and rc != 0 and rc != 1
+    assert "REFUSED" in out and SYM in out
+    assert f"PARTIAL (exit {update.EXIT_PARTIAL})" in out
+    assert "replica syncs" in out
+    # The symbol that did not refuse is untouched and still correct.
+    assert not store.read_bars(other, "series", "tradingview").empty
+
+
+def test_every_symbol_refusing_is_still_a_plain_failure(raw, capsys):
+    """Nothing usable came of the run, so the wrapper has nothing to deliver and
+    the later routine is the retry. This must NOT become EXIT_PARTIAL."""
+    assert update.main(["--build-tradingview", "--symbols", SYM,
+                        "--expect-session", "2026-09-16"]) == 0
+    capsys.readouterr()
+    d = payload()
+    d["bars"][-1]["c"] = float(d["bars"][-1]["c"]) + 0.5
+    write(raw, "2026-09-17.json", d)
+    rc = update.main(["--build-tradingview", "--symbols", SYM,
+                      "--expect-session", "2026-09-16"])
+    assert rc == 1
+    assert "PARTIAL" not in capsys.readouterr().out
+
+
+def test_a_symbol_that_was_already_current_counts_as_succeeding(raw, capsys):
+    """The flag answers "did every symbol refuse", not "did this run write rows".
+    The live case: the thirteen good series were ALREADY current on the producer,
+    so a run that writes nothing and refuses two must still be partial, or the
+    sync stays blocked for as long as the restatement is unresolved."""
+    other = _second_symbol(raw)
+    both = ["--symbols", SYM, other]
+    assert update.main(["--build-tradingview", *both,
+                        "--expect-session", "2026-09-16"]) == 0
+    capsys.readouterr()
+    d = payload()
+    d["bars"][-1]["c"] = float(d["bars"][-1]["c"]) + 0.5
+    write(raw, "2026-09-17.json", d)
+    rc = update.main(["--build-tradingview", *both, "--expect-session", "2026-09-16"])
+    out = capsys.readouterr().out
+    assert rc == update.EXIT_PARTIAL
+    assert "already current" in out          # `other` wrote nothing this run
+    assert "wrote=0" in out
+    assert other
+
+
+def test_the_partial_flag_is_on_the_result_dict(raw):
+    other = _second_symbol(raw)
+    two = [SYM, other]
+    assert tprov.build(two, expect_session="2026-09-16")["partial"] is False
+    d = payload()
+    d["bars"][-1]["c"] = float(d["bars"][-1]["c"]) + 0.5
+    write(raw, "2026-09-17.json", d)
+    res = tprov.build(two, expect_session="2026-09-16")
+    assert res["partial"] is True and res["ok"] is False and res["failed"] == 1
+    assert tprov.build([SYM], expect_session="2026-09-16")["partial"] is False
+    assert other
 
 
 def test_cli_refuses_bars_on_the_series_domain_and_a_stray_gate_flag(tmp_store):
