@@ -252,6 +252,94 @@ validates and writes. The guards that module already has (no number through
 prose, overlap agreement, refuse rather than rewrite) are the ones this needs,
 plus the session-date re-derivation from defect 1.
 
+## What a price series can and cannot give you
+
+Prices do not contain positions. Three price-derived quantities come close
+enough to be worth ranking, and the ranking is the useful part. The symbol
+inventory behind them, all measured through the connector on 2026-10-25:
+
+| Symbol | What | Daily bars | First | Use |
+|---|---|---|---|---|
+| `KRX:K2I1!` | front-month continuous | 3,568 | 2012-03-09 | the long leg of everything below |
+| `KRX:K2I2!` | second-month continuous | probed window | n/a | roll detection, 2 to 350 contracts a day off-roll |
+| `KRX:KOSPI200` | cash index | about 9,040 | roughly 1990 | basis, **one session late** |
+| `KRX:KOSPI200TRR` | total-return index | 1,450 | 2020-11-23 | dividend accrual, so fair-value basis only from here |
+| `KRX:KOSPI_EXKOSPI200` | KOSPI excluding the 200 | 1,592 | 2020-04-27 | large-against-small tilt |
+| `KRX:K2G15P` | KOSPI 200 USD spot | 108 | 2026-05-18 | too short to use |
+| `AMEX:EWY` | iShares MSCI South Korea | 6,649 | about 2000 | longest Korea series reachable, with volume |
+| V-KOSPI 200 | implied volatility | **none** | n/a | searched for and absent from the feed |
+
+### The three that mean something
+
+**1. Basis, front future minus cash index.** This is the closest thing in this
+whole note to reading a position off a price, and the reason is specific to
+Korea rather than general. The index-arbitrage book (program trading) is held
+*against* the basis by construction: desks carry cash-long against futures-short
+when the basis is rich and unwind when it goes cheap, so a persistently cheap
+basis is a measure of accumulated arbitrage-book stress, and its unwind
+mechanically produces program selling in the cash market. The position is
+inferable because the trade that creates it is mechanical. Two caveats. Raw
+basis mixes carry (the rate minus the dividend yield) with pressure, and
+separating them needs the dividend series, which `KOSPI200TRR` only provides
+from 2020-11, plus a KRW rate this stack does not carry. Before that the only
+honest treatment is to de-trend empirically against days to expiry. And basis is
+the one quantity here exposed to the one-session defect, so it must be computed
+on re-derived session dates.
+
+**2. Calendar spread, front minus second.** The same mechanism over the roll
+horizon, and the cleanest of the three, because both legs are futures symbols
+sharing one timestamp convention. **It sidesteps the index dating defect
+entirely**, and it covers the whole futures history rather than the 2020-11
+dividend window. If one thing here gets built first, it should be this.
+
+**3. Roll concentration, from second-month volume.** Measured at this roll: a 2
+to 350 contract baseline against a 24,344 peak, spread over four sessions. How
+many sessions a roll takes is a crude homogeneity read on the holder base, since
+a one-session roll means everyone is in the same trade with the same calendar.
+Weak, but it is free and it needs no other vendor.
+
+### The two that need an argument
+
+**4. KOSPI 200 against KOSPI ex-200**, from 2020-04. Foreign institutions
+concentrate in the large caps and domestic individuals in the small ones, so the
+spread reads as a foreign-against-retail tilt. It is also a plain size factor,
+and nothing in the series separates the two, so it conflates investor base with
+size. That is the same bind the held-out set is in: two of the three usable
+held-out markets are equity index futures, so a hypothesis whose rival
+explanation is equity drift cannot be discriminated there either, only
+sign-checked.
+
+**5. EWY against the KOSPI 200 in USD**, about 26 years, the longest Korea
+series reachable. The US close falls roughly six and a half hours after the
+Korean close, so an ETF premium computed across them is dominated by stale NAV:
+it mostly contains Korea's *next* session return rather than anyone's holding.
+That makes it a usable predictor and a bad positioning measure, and calling it
+positioning would be wrong.
+
+Futures turnover on its own does not make the list. Volume without open interest
+is flow without a stock, so a turnover spike cannot be distinguished from a
+position change.
+
+### What is simply not there
+
+- **Open interest**, which is the denominator the deployed NPF edge normalizes
+  by. Neither the net position nor the OI exists in this feed, so nothing in
+  `cotmetrics`' positioning index can be computed for Korea from prices.
+- **Any investor-category split.** That is the screen-only KRX dataset this note
+  started with, and no amount of price data substitutes for it.
+- **Implied volatility.** V-KOSPI 200 is not served, so the `vrp_multi` pattern
+  in `npf/trading_riot`, which maps each registered implied index to a realized
+  counterpart, cannot be extended to Korea. KRX publishes the index and
+  TradingView does not carry it.
+- **The option put/call ratio**, another KRX screen statistic (`MDC0201050403`).
+
+So the honest shape of a Korea study built only on what is reachable today is a
+basis and calendar-spread study, not a positioning study. It would ask whether
+index-arbitrage pressure predicts returns, which is a well-populated question in
+the Korean literature and is not the question the rest of this note is about.
+Worth being explicit about that substitution rather than letting a basis series
+quietly inherit the word "positioning".
+
 ## The cheaper first probe
 
 If the real question is "does Korean investor positioning predict KOSPI", the
@@ -298,9 +386,11 @@ opposite: build the pipe, then look for the signal.
 
 ## What was read on 2026-10-25
 
-- TradingView connector, `mcp-tv-get-ohlcv` against `KRX:K2I1!`, `KRX:K2I2!` and
-  `KRX:KOSPI200`, daily interval. The join, shift test and roll figures above
-  were computed from those payloads.
+- TradingView connector, `mcp-tv-get-ohlcv` against `KRX:K2I1!`, `KRX:K2I2!`,
+  `KRX:KOSPI200`, `KRX:KOSPI200TRR`, `KRX:KOSPI_EXKOSPI200`, `KRX:K2G15P` and
+  `AMEX:EWY`, daily interval, plus `mcp-tv-search-symbols` for V-KOSPI 200,
+  which returned nothing. The join, shift test, basis and roll figures are
+  reproduced by `scripts/korea_tradingview_probe.py`.
 
 - KRX Open API derivatives service list: <https://openapi.krx.co.kr/contents/OPP/USES/service/OPPUSES005_S1.cmd>
 - KRX Open API field spec for `fut_bydd_trd`: the detail page of the above
@@ -323,4 +413,7 @@ to KOSPI. The price gate that used to block all of it is open: TradingView serve
 a KOSPI 200 futures series back to 2012 and the cash index back to about 1990,
 which is enough to run a study. It is not enough to run it carelessly, because
 the cash index arrives dated one session late, and a join on the published dates
-would hand a study a one-day look-ahead that no later test would catch.
+would hand a study a one-day look-ahead that no later test would catch. And
+prices alone will not answer the positioning question: what they support is a
+basis and calendar-spread study of index-arbitrage pressure, which is a
+different question wearing a similar word.
