@@ -2,7 +2,9 @@
 
 **Date:** 2026-10-25
 **Status:** scoping only. No decision, no ADR, no registry entry, and nothing
-written to any store.
+written to any store. Updated 2026-10-25 with a measured answer to the price
+gate: Norgate does not carry KOSPI 200, TradingView does, and its cash index
+arrives dated one session late.
 **Raised by:** a chat question, "is there an equivalent of COT positioning data
 for Korea's KOSPI?". Everything below marked *verified* was read off KRX's own
 pages on 2026-10-25. Everything else is flagged as a check to run.
@@ -133,15 +135,15 @@ its own sibling. That is an ADR's decision, not this note's.
    lawful but manual, which means a human or a Desktop routine in the loop
    forever. Purchase has an unknown price for a single researcher. Neither is a
    `requests.get`.
-2. **Find bars for the underlying, and treat this as the first gate.** There is
-   nothing to test positioning against without a KOSPI 200 price series.
-   databento is GLBX-only, so it cannot serve it. Whether Norgate carries KRX
-   KOSPI 200 futures is a one-minute check on the Windows box and should happen
-   before anything else in this list. The ETF-proxy escape hatch (EWY, the way
-   `cotmetrics.market_data.PRICE_PROXIES` prices MFS and MME off EFA and EEM) is
-   the known trap: MME and MFS yield no trades in an npf book and must be
-   evaluated GROSS because the proxy has no futures cost specs. Do not plan on
-   it.
+2. **Bars for the underlying. This was the first gate, and it is now open.**
+   Neither stored vendor can serve KOSPI 200: databento is GLBX-only, and Norgate
+   does not carry it (confirmed 2026-10-25). TradingView does, through the
+   connector this repo already uses for the `series` domain. The measurements are
+   in the section below. That turns step 2 from a blocker into a vendor decision,
+   and it moves the ETF-proxy escape hatch (EWY, the way
+   `cotmetrics.market_data.PRICE_PROXIES` prices MFS and MME off EFA and EEM) off
+   the table, which is a relief: MME and MFS yield no trades in an npf book and
+   must be evaluated GROSS because the proxy has no futures cost specs.
 3. **Registry work.** A new asset class, a domain decision (`series` or
    something new), and the `kind` extension above. `_CLASS_DOMAIN` in
    `registry.py` is where the class-to-domain mapping lands.
@@ -172,6 +174,83 @@ its own sibling. That is an ADR's decision, not this note's.
 
 That is nine steps and a subscription question for a dataset whose predictive
 content nobody here has measured.
+
+## TradingView serves the price series, measured 2026-10-25
+
+Norgate does not carry KOSPI 200 and databento cannot (GLBX only), so the
+remaining route is the TradingView connector this repo already uses for the
+`series` domain. It works. Everything in this section was read through that
+connector on 2026-10-25 and is reproducible with `mcp-tv-get-ohlcv`.
+
+| Symbol | What it is | Daily bars | Range | Volume | Open interest |
+|---|---|---|---|---|---|
+| `KRX:K2I1!` | front-month continuous KOSPI 200 futures | 3,568 | 2012-03-09 to 2026-10-23 | yes, 100k to 300k contracts | **no** |
+| `KRX:K2I2!` | second-month continuous | same calendar | same window probed | yes, but 2 to 350 a day away from the roll | **no** |
+| `KRX:KOSPI200` | cash index | about 9,040 | roughly 1990 to date | null | n/a |
+
+The futures history floor is the feed's, not the contract's: KOSPI 200 futures
+have traded since 1996, and the connector serves 2012-03-09 onward. The cash
+index reaches back far enough to cover 1997-98 and 2008, with 1,467 bars before
+1996 alone, which makes it the better series for anything needing a crisis.
+
+### Three defects to guard, one of them serious
+
+**1. The cash index is labelled one session late.** This is the finding that
+matters. Joining `KRX:KOSPI200` to `KRX:K2I1!` on the dates each one publishes
+gives a mean absolute daily return difference of **3.398 pp** (max 12.908).
+Pulling the index back one session gives **0.298 pp** (max 0.765). A two-session
+shift is as bad as none (3.366 pp), so the offset is exactly one session, and the
+futures symbol is the correctly dated one. The basis tells the same story: as
+labelled it swings between -75 and +70 index points, and after the correction it
+is +1.86 points on average, range -4.00 to +9.68, which is 0.0 to 0.6 percent of
+index and a plausible futures basis. The index's newest bar is stamped
+2026-10-26 while the futures' is 2026-10-23.
+
+The consequence is the reason this is written down. A study that joins these two
+symbols on their own labels gets the index's close from the session *after* the
+futures bar, which is a one-day look-ahead on the signal side. It would not
+announce itself in any backtest. Any ingest has to re-derive the index's session
+date rather than trust it, and the guard belongs in code with this measurement
+cited beside it.
+
+**2. The newest bar mutates.** The same timestamp (2026-10-23) read three times
+within one session returned closes of 858.45, 857.65 and 856.45, with volume
+93,517 then 93,636 then 93,963. The tool's own notice says the last bar is still
+forming. So the newest bar must never be stored as final, or the existing
+overlap-agreement guard in `providers/tradingview.py` will refuse the next
+night's file for a disagreement the producer caused itself.
+
+**3. No open interest.** The payload is `t, o, h, l, c, v` and nothing else. This
+closes the price gate and does nothing at all for the positioning question that
+started the note. TradingView is not a substitute for the KRX investor data.
+
+### What the roll looks like
+
+The roll is locatable without a calendar: `KRX:K2I2!` volume spikes from its 2 to
+350 baseline to 1,642, 4,112, 13,904 and 24,344 across 2026-09-03 to 2026-09-08,
+then collapses to 13. The front-to-second spread through that week was +1.25 to
++6.45 points, about 0.1 to 0.6 percent, so whatever the adjustment convention,
+the roll error in this contract is small. Small is not zero, and the convention
+is **not** established by this probe, which is now an open question below.
+
+### Where it would live, which is a different answer from the rest of the note
+
+The `series` domain is the wrong home for this. `registry.yaml` says the
+`tradingview` field is "never defaulted; only the `series` domain lives there",
+and that domain is one `raw` tier of non-price readings. A KOSPI 200 bar series
+is **bars**, so it belongs in the `futures` domain with a third price source
+beside `norgate` and `databento`, which means `PRICE_SOURCES`, a provider module,
+and an ADR, exactly the treatment ADR-0007 gave the first two. Two further holes
+to fill before that: this repo has no KRX market calendar, and the night-session
+question above decides what a daily bar even means here.
+
+What does carry over from the `series` work is the producer shape, because the
+constraint is identical. There is no data API, the feed reaches this stack
+through a connector only a Claude session can call, so stage 1 is a local routine
+on the producer box writing results verbatim and stage 2 is offline code that
+validates and writes. The guards that module already has (no number through
+prose, overlap agreement, refuse rather than rewrite) are the ones this needs,
+plus the session-date re-derivation from defect 1.
 
 ## The cheaper first probe
 
@@ -211,11 +290,17 @@ opposite: build the pipe, then look for the signal.
 |---|---|
 | Does KRX publish investor-split open interest behind the login? | Free Data Marketplace account, one look at `MDC0201050302`'s column set. No account was created on 2026-10-25. |
 | Is `투자자별 거래실적` futures-only or futures-and-options combined? | Same look. This matters the way the CIT Supplemental's combined basis matters in cotdata: a combined series is a different quantity for the same market and week, and nothing in the file says so. |
-| Does Norgate carry KRX KOSPI 200 futures? | One query on the Windows box. This is step 2 and the cheapest gate in the list. |
+| Is the front-month continuous series back-adjusted or raw-stitched? | Compare two bars either side of several rolls against the cash index. One roll cannot settle it: an unadjusted roll gap here is about 0.16 pp, inside this probe's 0.765 pp noise floor. |
+| Does the daily futures bar include the night session? | The tool's notice says regular session only, but the newest bar kept moving on a Sunday, which is when the Monday night session opens. Read an intraday pull and compare. |
+| Does TradingView serve KRX open interest anywhere? | Not in the OHLCV payload. If it exists at all it is a chart study rather than a data field, so assume no until shown otherwise. |
 | Is KRX investor data priced for a single researcher? | Data Marketplace data-purchase menu, which is also login-walled. |
 | Do the broker terminals' `투자자별 미결제약정` charts come from a KRX licensed feed or a broker computation? | Ask a member firm, or find the field in a KRX product sheet. It decides whether an investor-level position series is purchasable at all. |
 
 ## What was read on 2026-10-25
+
+- TradingView connector, `mcp-tv-get-ohlcv` against `KRX:K2I1!`, `KRX:K2I2!` and
+  `KRX:KOSPI200`, daily interval. The join, shift test and roll figures above
+  were computed from those payloads.
 
 - KRX Open API derivatives service list: <https://openapi.krx.co.kr/contents/OPP/USES/service/OPPUSES005_S1.cmd>
 - KRX Open API field spec for `fut_bydd_trd`: the detail page of the above
@@ -234,6 +319,8 @@ contract per day, back to 2010. What it gives behind a login is daily turnover b
 investor type, which is a flow rather than a holding, split by what kind of firm
 traded rather than by why. That is enough to test a "follow the foreigners, fade
 the individuals" flow hypothesis, and not enough to port a positioning-level fade
-to KOSPI. Before any of that, the gating fact is unglamorous: this stack has no
-KOSPI 200 price series, and nothing about positioning can be tested until it
-does.
+to KOSPI. The price gate that used to block all of it is open: TradingView serves
+a KOSPI 200 futures series back to 2012 and the cash index back to about 1990,
+which is enough to run a study. It is not enough to run it carelessly, because
+the cash index arrives dated one session late, and a join on the published dates
+would hand a study a one-day look-ahead that no later test would catch.
