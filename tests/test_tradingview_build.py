@@ -22,6 +22,9 @@ SYM = "NASDAQ_FOMO_5D"
 ET = ZoneInfo("America/New_York")
 # The fixture ends on the 2026-09-16 session, which is also a registry anchor.
 LAST = pd.Timestamp("2026-09-16")
+# A capture's last bar is provisional, so one capture alone stores through the
+# session before it.
+SETTLED = pd.Timestamp("2026-09-15")
 
 
 @pytest.fixture()
@@ -48,6 +51,20 @@ def stored():
     return store.read_bars(SYM, "series", "tradingview")
 
 
+#: 2026-09-17's bar stamp, the session after the fixture's last.
+NEXT_T = 1789651800
+
+
+def next_capture(raw, last_close=32.23, name="2026-09-17.json"):
+    """The next night's pull: the fixture's last three bars, the third of them now
+    settled at `last_close`, plus a provisional 2026-09-17 bar."""
+    d = payload()
+    d["bars"] = d["bars"][-3:] + [{"c": 40.1, "h": 41.0, "l": 39.0, "o": 39.5,
+                                   "t": NEXT_T, "v": None}]
+    d["bars"][-2]["c"] = last_close
+    write(raw, name, d)
+
+
 # ── the happy path ──────────────────────────────────────────────────────────
 def test_raw_root_defaults_under_the_store_and_honours_the_env(tmp_store, monkeypatch):
     assert tprov.raw_root() == Path(tmp_store) / "_raw" / "tradingview"
@@ -66,17 +83,75 @@ def test_session_date_is_the_eastern_date_of_the_open_stamp():
 
 
 def test_build_writes_the_fixture_and_the_reader_serves_it(raw):
+    """Every bar but the last. The last is the session the pull reached, which is
+    what the gate checks, and is held back until a later capture confirms it."""
     res = tprov.build([SYM], expect_session=str(LAST.date()))
     assert res["ok"] and res["wrote"] == 1 and res["failed"] == 0
     df = stored()
-    assert len(df) == 10
-    assert df.index[0] == pd.Timestamp("2026-09-02") and df.index[-1] == LAST
-    assert df.loc[LAST, "Close"] == 32.23
+    assert len(df) == 9
+    assert df.index[0] == pd.Timestamp("2026-09-02") and df.index[-1] == SETTLED
+    assert LAST not in df.index
+    assert df.loc[SETTLED, "Close"] == 38.9
     assert list(df.columns) == ["Open", "High", "Low", "Close"]
     from marketdata import get_bars
-    assert get_bars(SYM)["Close"].iloc[-1] == 32.23
+    assert get_bars(SYM)["Close"].iloc[-1] == 38.9
     entry = store.load_manifest()["bars"][f"series/tradingview/{SYM}"]
-    assert entry["source"] == "tradingview" and entry["last_date"] == "2026-09-16"
+    assert entry["source"] == "tradingview" and entry["last_date"] == "2026-09-15"
+
+
+# ── the provisional bar ─────────────────────────────────────────────────────
+#
+# Measured on the producer box's captures, 2026-09-16 to 2026-10-23, all fifteen
+# series: the vendor later revised a capture's NEWEST bar 54 times in 226, and a bar
+# it had already served as non-final 0 times in about 215. Storing the newest bar
+# froze 14 of 15 series, each on the first night the vendor revised one.
+
+def test_the_newest_bar_is_stored_once_a_later_capture_confirms_it(raw):
+    tprov.build([SYM], expect_session=str(LAST.date()))
+    next_capture(raw)
+    res = tprov.build([SYM], expect_session="2026-09-17")
+    assert res["ok"] and res["wrote"] == 1
+    df = stored()
+    assert df.index[-1] == LAST and df.loc[LAST, "Close"] == 32.23
+    assert pd.Timestamp("2026-09-17") not in df.index
+
+
+@pytest.fixture()
+def unanchored(monkeypatch):
+    """The symbol without its registry anchors. The fixture's last bar IS the
+    2026-09-16 anchor, so revising it would trip that check before this one."""
+    sym = REGISTRY[SYM]
+    bare = sym.__class__(**{**sym.__dict__, "anchors": ()})
+    monkeypatch.setattr(tprov, "_targets", lambda symbols=None: [bare])
+
+
+def test_the_vendor_revising_the_newest_bar_is_not_a_refusal(raw, unanchored):
+    """The case that froze the domain: NASDAQ FOMO 2026-09-28 was 29.25 on the
+    evening of the session and 29.35 the next day. The first value was never
+    final, so it is neither compared nor stored, and the revised one lands."""
+    tprov.build([SYM], expect_session=str(LAST.date()))
+    next_capture(raw, last_close=32.40)
+    res = tprov.build([SYM], expect_session="2026-09-17")
+    assert res["ok"] and res["failed"] == 0
+    assert stored().loc[LAST, "Close"] == 32.40
+
+
+def test_a_revision_of_a_settled_bar_is_still_refused(raw, unanchored):
+    """The guard is narrowed, not dropped: once a bar has been served as non-final,
+    a later disagreement is a restatement or a slip, and a human decides."""
+    next_capture(raw, last_close=32.23)
+    tprov.build([SYM], expect_session="2026-09-17")
+    next_capture(raw, last_close=32.40, name="2026-09-18.json")
+    res = tprov.build([SYM], expect_session="2026-09-17")
+    assert not res["ok"] and "earlier raw file" in res["errors"][0][1]
+
+
+def test_the_gate_reads_the_pull_not_the_trailing_store(raw):
+    """The store trails the pull by one session by design, so the gate must ask how
+    far the CAPTURE reached; asked of the store, every night would read as stale."""
+    res = tprov.build([SYM], expect_session=str(LAST.date()))
+    assert res["ok"] and stored().index[-1] == SETTLED
+    assert tprov.build([SYM], expect_session=str(LAST.date()))["ok"]
 
 
 def test_a_second_build_is_a_no_op(raw):
@@ -89,16 +164,13 @@ def test_a_second_build_is_a_no_op(raw):
 
 def test_a_later_file_appends_only_the_new_bars_and_leaves_the_old_untouched(raw):
     tprov.build([SYM], expect_session=str(LAST.date()))
-    d = payload()
-    d["bars"] = d["bars"][-3:] + [{"c": 40.1, "h": 41.0, "l": 39.0, "o": 39.5,
-                                   "t": 1789651800, "v": None}]   # 2026-09-17
-    write(raw, "2026-09-17.json", d)
+    next_capture(raw)
     res = tprov.build([SYM], expect_session="2026-09-17")
     assert res["ok"] and res["wrote"] == 1
     df = stored()
-    assert len(df) == 11 and df.index[-1] == pd.Timestamp("2026-09-17")
+    assert len(df) == 10 and df.index[-1] == LAST
+    assert df.loc[SETTLED, "Close"] == 38.9
     assert df.loc[LAST, "Close"] == 32.23
-    assert df.loc["2026-09-17", "Close"] == 40.1
 
 
 # ── refusals, each writing nothing ─────────────────────────────────────────
@@ -109,12 +181,12 @@ def test_an_overlapping_bar_that_disagrees_with_the_store_refuses_the_file(raw):
     (raw / SYM / "2026-09-16.json").unlink()
     d = payload()
     d["bars"][-2]["c"] = 38.91        # 2026-09-15 is 38.9 in the store
-    d["bars"].append({"c": 40.1, "h": 41.0, "l": 39.0, "o": 39.5, "t": 1789651800, "v": None})
+    d["bars"].append({"c": 40.1, "h": 41.0, "l": 39.0, "o": 39.5, "t": NEXT_T, "v": None})
     write(raw, "2026-09-17.json", d)
     res = tprov.build([SYM], expect_session="2026-09-17")
     assert not res["ok"] and res["failed"] == 1 and res["wrote"] == 0
     assert "2026-09-15" in res["errors"][0][1] and "never rewritten" in res["errors"][0][1]
-    assert len(stored()) == 10           # the new bar did not land either
+    assert len(stored()) == 9            # 2026-09-16 did not land either
 
 
 def test_two_raw_files_that_disagree_refuse_before_the_store_is_touched(raw):
@@ -444,7 +516,7 @@ def test_accepting_overwrites_the_stored_bar_and_prints_both_values(raw, capsys)
     assert float(stored()["Close"].loc[RESTATED_DAY]) == 41.0 != was
     assert "ACCEPTED" in out and f"{was:g}" in out and "41" in out
     # The row count is unchanged: a restatement replaces a bar, never appends one.
-    assert len(stored()) == 10
+    assert len(stored()) == 9
 
 
 def test_accepting_is_scoped_to_the_named_symbol(raw, capsys):
@@ -539,7 +611,7 @@ def test_csv_export_becomes_a_raw_file_the_build_accepts(tmp_store, tmp_path):
     assert [b["t"] for b in data["bars"]] == [b["t"] for b in bars]   # sorted back
     res = tprov.build([SYM], expect_session=str(LAST.date()))
     assert res["ok"] and res["wrote"] == 1
-    assert stored().loc[LAST, "Close"] == 32.23
+    assert stored().loc[SETTLED, "Close"] == 38.9
 
 
 def test_csv_export_accepts_iso_timestamps_and_refuses_missing_columns(tmp_store, tmp_path):
@@ -564,4 +636,4 @@ def test_cli_csv_import_needs_exactly_one_symbol_and_then_builds(tmp_store, tmp_
     assert "csv-export.json" in capsys.readouterr().out
     assert update.main(["--build-tradingview", "--symbols", SYM,
                         "--expect-session", "none"]) == 0
-    assert len(stored()) == 10
+    assert len(stored()) == 9
