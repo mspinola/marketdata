@@ -27,17 +27,29 @@ bar:
 
   * No number passes through prose. The routine writes the connector's JSON; this
     parses it. A file that is not that shape is refused.
-  * Overlap agreement. Every bar in a raw file whose session date the store already
-    holds must equal the stored Close exactly. Any mismatch refuses the WHOLE file.
-    With a ten-bar nightly pull nine bars are overlap, so a slip on an existing bar
-    is caught that night and a slip on the new bar the next night. The build never
-    rewrites a stored bar: a genuine vendor restatement surfaces as a refusal for a
-    human to resolve, which is the workspace's posture on restated history.
+  * A capture's newest bar is PROVISIONAL. It tells the session gate how far the
+    pull reached and is otherwise ignored: no overlap check, never stored. A
+    session is stored only once a LATER capture holds it as a non-final bar. The
+    reason is measured, not assumed: across every nightly capture from 2026-09-16 to
+    2026-10-23, all fifteen series, the vendor later revised the newest bar 54 times
+    in 226 (24%), and a bar it had already served once as non-final 0 times in about
+    215. So the evening value of the day's bar is not final at 18:30 or 19:45 ET,
+    even though the close is hours past. Storing it froze 14 of 15 series from late
+    September, because the store is never rewritten and every later capture then
+    disagreed with it. The cost is that the store trails the pull by one session.
+  * Overlap agreement. Every SETTLED bar in a raw file whose session the store or
+    an earlier file already holds must equal that Close exactly. Any mismatch
+    refuses the symbol. With a ten-bar nightly pull eight settled bars are overlap,
+    so a slip on an existing bar is caught that night and a slip on the newly
+    settled bar the next night. The build never rewrites a stored bar: a genuine
+    vendor restatement surfaces as a refusal for a human to resolve, which is the
+    workspace's posture on restated history.
   * Shape and range. Timestamps strictly increasing, one per session; the registry
     `kind` fixes the range (percent 0-100, count a non-negative integer, ratio in
     (0, 10]).
-  * Session gate, both sides. The newest bar across the raw files and the store must
-    be exactly the expected session (the latest weekday whose 16:30 ET close has
+  * Session gate, both sides. The newest bar across the raw files (provisional
+    included, since the gate is a question about the pull) and the store must be
+    exactly the expected session (the latest weekday whose 16:30 ET close has
     passed). Older is refused as stale, and the scheduled retry is the routine's
     second run. Newer is refused as unsettled: a routine that fires before the close
     gets the day in progress, whose Close still moves, and a bar stored once is never
@@ -293,8 +305,16 @@ def check_anchors(df: pd.DataFrame, sym: Symbol, what: str) -> None:
 
 
 def merge_raw(sym: Symbol, files: Iterable[Path], *,
-              accept: bool = False, log: Optional[list] = None) -> pd.DataFrame:
-    """The union of a symbol's raw files, refusing any bar two files disagree on.
+              accept: bool = False, log: Optional[list] = None) -> tuple:
+    """The union of a symbol's SETTLED bars, refusing any bar two files disagree on,
+    plus the newest session any file reached.
+
+    Returns ``(settled, captured_through)``. Each file's last bar is provisional (see
+    the module docstring): it counts toward `captured_through`, which is what the
+    session gate reads, and is left out of `settled`, so it is neither compared nor
+    stored until a later file holds it as a non-final bar. Range and anchor checks
+    still run on the whole file, because a provisional bar out of range or off an
+    anchor is still a broken pull.
 
     `accept` takes the LATER file's close instead of refusing, which is what
     "accept the vendor's restatement" means at this stage: files are read oldest
@@ -306,9 +326,13 @@ def merge_raw(sym: Symbol, files: Iterable[Path], *,
     that a session-gate refusal then never performed.
     """
     merged = None
+    captured_through = None
     for path in files:
         df = parse_raw(path, sym)
         check_anchors(df, sym, path.name)
+        newest = df.index[-1]
+        captured_through = newest if captured_through is None else max(captured_through, newest)
+        df = df.iloc[:-1]
         if merged is None:
             merged = df
             continue
@@ -336,7 +360,7 @@ def merge_raw(sym: Symbol, files: Iterable[Path], *,
     if merged is None:
         raise RawError(f"{sym.internal}: no raw files under {raw_root() / sym.internal}")
     merged.index.name = "Date"
-    return merged
+    return merged, captured_through
 
 
 # ── The build ─────────────────────────────────────────────────────────────
@@ -360,7 +384,8 @@ def build_symbol(sym: Symbol, expect, *, accept: bool = False) -> int:
     # session gate below can still refuse the symbol, and an ACCEPTED line above a
     # refusal reads as history having been rewritten when nothing was touched.
     pending: list = []
-    merged = merge_raw(sym, raw_files(sym.internal), accept=accept, log=pending)
+    merged, captured_through = merge_raw(sym, raw_files(sym.internal), accept=accept,
+                                         log=pending)
     restated = 0
     stored = store.read_bars(sym.internal, DOMAIN, NAME)
     if not stored.empty:
@@ -396,7 +421,8 @@ def build_symbol(sym: Symbol, expect, *, accept: bool = False) -> int:
         new = merged
         out = merged
     out.index.name = "Date"
-    newest = out.index.max()
+    # The pull's reach, not the store's: the store trails by the provisional bar.
+    newest = out.index.max() if out.index.max() > captured_through else captured_through
     # The gate has two sides, and neither writes anything. TOO OLD is a pull that
     # has not landed yet, and the routine's later run is the retry. TOO NEW is a
     # bar whose session has not closed: asked before 16:30 ET the vendor serves
