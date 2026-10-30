@@ -44,7 +44,10 @@ def test_the_markets_glbx_does_not_carry_are_marked_null():
     instead of paying for a query that returns nothing."""
     uncovered = sorted(s.internal for s in all_symbols()
                        if s.domain == "futures" and s.databento is None)
-    assert uncovered == ["CC", "CT", "DX", "KC", "LBR", "OJ", "SB", "WBS"]
+    assert uncovered == ["BRN", "CC", "CT", "DX", "FDAX", "FESX", "FGBL", "FGBM", "KC", "LBR",
+                         "LFT", "LLG", "NIY", "OJ", "SB", "UB", "WBS"]
+    # Eurex and ICE Europe are not on Globex either. UB and NIY are, but were added
+    # (2026-10-30) only for Norgate daily bars, so they stay off the paid databento pull.
 
 
 def test_an_uncovered_market_still_resolves_to_a_vendor():
