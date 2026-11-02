@@ -44,9 +44,9 @@ def test_registry_series_symbols_name_one_series_vendor_and_no_price_vendor():
         assert s.yahoo is None and s.norgate is None and s.databento is None, s.internal
         assert s.kind in SERIES_KINDS, s.internal
         assert not _can_serve(s, "yfinance")
-        if s.aaii:
+        if s.aaii or s.naaim:
             assert s.tradingview is None, s.internal
-            assert resolve_source(s) == "aaii", s.internal
+            assert resolve_source(s) == ("aaii" if s.aaii else "naaim"), s.internal
         else:
             assert s.tradingview and ":" in s.tradingview, s.internal
             assert resolve_source(s) == "tradingview", s.internal
@@ -59,7 +59,7 @@ def test_registry_series_symbols_name_one_series_vendor_and_no_price_vendor():
 def test_non_series_symbols_carry_no_series_attributes():
     for s in REGISTRY.values():
         if s.domain != D:
-            assert s.tradingview is None and s.aaii is None, s.internal
+            assert s.tradingview is None and s.aaii is None and s.naaim is None, s.internal
             assert s.kind is None and s.anchors == (), s.internal
 
 

@@ -138,6 +138,15 @@ def main(argv=None) -> int:
                         "store lacks; a week the store holds at a different value is "
                         "refused unless named in --accept-restatement. Never commit the "
                         "file: it is AAII member data.")
+    p.add_argument("--fetch-naaim", action="store_true",
+                   help="series domain, network: save today's page of NAAIM's free "
+                        "Exposure Index table (three months delayed, about 130 weeks) "
+                        "verbatim under $MARKETDATA_NAAIM_RAW (else _raw/naaim under the "
+                        "store). Pair with --build-naaim.")
+    p.add_argument("--build-naaim", action="store_true",
+                   help="series domain, no network: build NAAIM_EXPOSURE from every "
+                        "saved capture. Captures must agree where they overlap; appends "
+                        "only weeks the store lacks.")
     p.add_argument("--expect-session", metavar="YYYY-MM-DD|none",
                    help="with --build-tradingview: the session the raw files must reach "
                         "and must not pass. Default: the latest weekday whose 16:30 ET "
@@ -166,11 +175,12 @@ def main(argv=None) -> int:
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
-            or args.tradingview_csv or args.build_aaii):
+            or args.tradingview_csv or args.build_aaii or args.fetch_naaim
+            or args.build_naaim):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
-                "--reconcile-databento, --build-tradingview, --tradingview-csv or "
-                "--build-aaii")
+                "--reconcile-databento, --build-tradingview, --tradingview-csv, "
+                "--build-aaii, --fetch-naaim or --build-naaim")
     if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
         p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
                 "--symbols entry, the internal name the export belongs to.")
@@ -185,9 +195,9 @@ def main(argv=None) -> int:
         p.error("--expect-session gates the TradingView build. Pass it with "
                 "--build-tradingview.")
     if args.accept_restatement is not None:
-        if not (args.build_tradingview or args.build_aaii):
+        if not (args.build_tradingview or args.build_aaii or args.build_naaim):
             p.error("--accept-restatement resolves a series build refusal. Pass it "
-                    "with --build-tradingview or --build-aaii.")
+                    "with --build-tradingview, --build-aaii or --build-naaim.")
         from .registry import REGISTRY
         unknown = [s for s in args.accept_restatement
                    if s not in REGISTRY or REGISTRY[s].domain != "series"]
@@ -391,6 +401,24 @@ def main(argv=None) -> int:
     if args.build_aaii:
         from .providers import aaii as aprov
         results.append(aprov.build(args.build_aaii, args.symbols,
+                                   accept_restatement=args.accept_restatement))
+
+    if args.fetch_naaim:
+        from .providers import naaim as nprov
+        try:
+            out = nprov.fetch()
+            print(f"naaim: captured {out}")
+            results.append({"kind": "series_naaim_fetch", "ok": True, "wrote": 1})
+        except (OSError, nprov.RawError) as e:
+            # A failed capture costs nothing while the table's window lasts; the
+            # build below still runs on the captures already saved.
+            print(f"naaim: capture FAILED -- {e}")
+            results.append({"kind": "series_naaim_fetch", "ok": False, "failed": 1,
+                            "errors": [("naaim", str(e))]})
+
+    if args.build_naaim:
+        from .providers import naaim as nprov
+        results.append(nprov.build(args.symbols,
                                    accept_restatement=args.accept_restatement))
 
     for res in results:

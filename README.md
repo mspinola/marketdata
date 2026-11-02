@@ -221,6 +221,16 @@ member data: it is never committed here, and the built series lives only in the
 store. Seed it on the Windows store, since the nightly mirror deletes anything
 the Mac holds alone. Guards: `providers/aaii.py`.
 
+A third, `NAAIM_EXPOSURE`, comes from NAAIM's free Exposure Index table, which
+runs three months behind and about 130 weeks deep (the full history is a paid
+subscription). `marketdata-update --fetch-naaim` saves the page verbatim under
+`_raw/naaim`, and `--build-naaim` appends the weeks the store lacks; captures
+must agree wherever they overlap. The Windows equities task runs both on
+weekdays, so the stored history grows past the table's window. NAAIM's paid
+full-history spreadsheet, copied into `_raw/naaim` as `*.xlsx`, is read by the
+same `--build-naaim` (standard library, no Excel package) and must agree with
+the captures too; it is never committed. Guards: `providers/naaim.py`.
+
 ```mermaid
 flowchart LR
   subgraph eq["EQUITIES: one stored frame"]

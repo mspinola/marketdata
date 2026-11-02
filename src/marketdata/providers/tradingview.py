@@ -100,7 +100,7 @@ _BAR_KEYS = ("t", "o", "h", "l", "c")
 # Inclusive ranges per kind. `count` has no ceiling; `ratio` has a loose one that a
 # put/call ratio has never approached (the series' printed high is 5.4).
 _RANGES = {"percent": (0.0, 100.0), "count": (0.0, None), "ratio": (0.0, 10.0),
-           "fraction": (0.0, 1.0)}
+           "fraction": (0.0, 1.0), "exposure": (-200.0, 200.0)}
 assert tuple(_RANGES) == SERIES_KINDS
 
 # TWO VENDOR CONVENTIONS, measured on the full-history pulls of 2026-09-17 and
