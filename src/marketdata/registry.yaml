@@ -398,8 +398,11 @@ Investor Sentiment:
   NAAIM_EXPOSURE:
     naaim: "NAAIM Number"
     kind: exposure
-    inception: "2024-01-31"
+    inception: "2006-07-05"
     anchors:
+      "2006-07-12": 31.2
+      "2015-03-18": 67.77057142857143
+      "2017-12-13": 120.55555555555556
       "2024-01-31": 87.36
       "2026-07-29": 79.70
-    note: "NAAIM Exposure Index, weekly mean equity exposure of active managers, -200 (leveraged short) to 200 (leveraged long). Built from the FREE public table, which runs three months behind and about 130 weeks deep, captured weekdays by the Windows equities task (--fetch-naaim --build-naaim) so the stored history grows past the table's window. `inception` is the first capture's earliest week, not the index's 2006 start; the full history is a paid NAAIM subscription. A later full-history file would have to match these weeks exactly, and should reproduce CEIC's public summary of the full series (read 2026-11-01): 1,046 weeks from 2006-07-05 to 2026-07-29, high 120.556 on 2017-12-13, low -3.561 on 2011-10-05."
+    note: "NAAIM Exposure Index, weekly mean equity exposure of active managers, -200 (leveraged short) to 200 (leveraged long). History from NAAIM's full-history spreadsheet (a paid file, kept only under _raw/naaim, received 2026-11-01, through 2026-07-29), extended by the FREE public table (three months behind, about 130 weeks deep), captured weekdays by the Windows equities task (--fetch-naaim --build-naaim). The file and the first capture agree exactly on all 131 shared weeks. It reproduces CEIC's public summary of the series (high 120.556 on 2017-12-13, low -3.561 on 2011-10-05, from 2006-07-05) but holds 1,047 weeks to CEIC's 1,046. Anchor 2015-03-18 pins a row the file dates 2014-03-18 (its S&P close is 2015-03-18's; see providers/naaim.py CORRECTIONS). Weeks 2016-01-20 and the 2015-03-18 original are absent from the file; 2016-01-20 is a genuine hole. The file's Mean/Average and NAAIM Number columns disagree on 2018-08-08 (87.68 vs 87.60), 2021-04-07 (89.85 vs 89.95) and 2022-06-22 (19.86 vs 18.86); the stored value is NAAIM Number, unresolved."

@@ -1,13 +1,15 @@
-"""`--fetch-naaim` / `--build-naaim`: the NAAIM Exposure Index from the free table.
+"""`--fetch-naaim` / `--build-naaim`: the NAAIM Exposure Index from the free table
+and from NAAIM's full-history spreadsheet.
 
-The captured page is NAAIM's data and is not committed, so the pages here are
-synthetic in the same markup (one table, a thead row, one tbody row per week,
+The captured page and the spreadsheet are NAAIM's data and are not committed, so
+the pages and workbooks here are synthetic in the same markup (one table, a thead row, one tbody row per week,
 newest first). The two anchor weeks carry their published values. Every
 refusal is checked to have written nothing. No network: `fetch` is exercised
 with urlopen patched.
 """
 import datetime as dt
 import io
+import zipfile
 
 import pandas as pd
 import pytest
@@ -35,6 +37,32 @@ def page(weeks, header=COLS):
 
 
 FIRST = [("02/07/2024", "93.77"), ("01/31/2024", "87.36")]
+
+_SS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+
+
+def workbook(path, weeks, header=("Date", "Mean/Average", "NAAIM Number")):
+    """A one-sheet xlsx as NAAIM ships it: shared-string header, dates as Excel
+    serials, newest first. weeks: [(\"YYYY-MM-DD\", value), ...]."""
+    def col(i):
+        return chr(65 + i)
+    head = "".join(f'<c r="{col(i)}1" t="s"><v>{i}</v></c>' for i in range(len(header)))
+    rows = [f'<row r="1">{head}</row>']
+    for n, (d, v) in enumerate(weeks, start=2):
+        serial = (pd.Timestamp(d) - pd.Timestamp("1899-12-30")).days
+        rows.append(f'<row r="{n}"><c r="A{n}" s="1"><v>{serial}</v></c>'
+                    f'<c r="B{n}"><v>{v!r}</v></c><c r="C{n}"><v>{v!r}</v></c></row>')
+    strings = "".join(f"<si><t>{h}</t></si>" for h in header)
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("xl/workbook.xml", f'<workbook xmlns="{_SS}"><workbookPr/></workbook>')
+        z.writestr("xl/sharedStrings.xml", f'<sst xmlns="{_SS}">{strings}</sst>')
+        z.writestr("xl/worksheets/sheet1.xml",
+                   f'<worksheet xmlns="{_SS}"><sheetData>{"".join(rows)}</sheetData></worksheet>')
+
+
+HISTORY = [("2024-02-07", 93.77), ("2024-01-31", 87.36), ("2017-12-13", 120.55555555555556),
+           ("2017-12-06", 99.5), ("2006-07-12", 31.2), ("2006-07-05", 19.444444444444443),
+           ("2006-07-12", 31.2), ("2006-07-05", 19.44)]
 LATER = [("07/29/2026", "79.70"), ("02/07/2024", "93.77")]
 
 
@@ -73,7 +101,7 @@ def test_captures_that_disagree_are_refused(raw):
     raw("2026-11-01", FIRST)
     raw("2026-11-02", [("02/07/2024", "93.70")])
     res = nprov.build()
-    assert not res["ok"] and "an earlier capture read 93.77" in res["errors"][0][1]
+    assert not res["ok"] and "an earlier source read 93.77" in res["errors"][0][1]
     assert stored().empty
 
 
@@ -146,7 +174,55 @@ def test_cli_fetch_failure_still_builds_saved_captures(raw, monkeypatch):
     assert len(stored()) == 2
 
 
+def test_history_file_reads_and_collapses_rounded_repeats(tmp_path):
+    workbook(tmp_path / "h.xlsx", HISTORY)
+    s = nprov.parse_history(tmp_path / "h.xlsx")
+    assert len(s) == 6 and s.index.is_monotonic_increasing
+    assert s[pd.Timestamp("2006-07-05")] == 19.444444444444443   # the unrounded copy
+
+
+def test_history_and_captures_build_together(raw):
+    raw("2026-11-01", LATER)
+    workbook(nprov.raw_root() / "history.xlsx", HISTORY)
+    res = nprov.build()
+    assert res["ok"] and res["wrote"] == 1
+    got = bars.get_bars(SYM)["Close"]
+    assert got.index[0] == pd.Timestamp("2006-07-05") and got.index[-1] == pd.Timestamp("2026-07-29")
+    assert len(got) == 7
+
+
+def test_history_that_contradicts_a_capture_is_refused(raw):
+    raw("2026-11-01", FIRST)
+    workbook(nprov.raw_root() / "history.xlsx", [("2024-02-07", 93.70)])
+    assert not nprov.build()["ok"]
+    assert stored().empty
+
+
+def test_the_known_misdated_row_is_redated(tmp_path):
+    workbook(tmp_path / "h.xlsx", [("2015-03-25", 84.3), ("2014-03-19", 89.8),
+                                   ("2014-03-18", 67.77057142857143), ("2014-03-12", 85.2)])
+    s = nprov.parse_history(tmp_path / "h.xlsx")
+    assert s[pd.Timestamp("2015-03-18")] == 67.77057142857143
+    assert pd.Timestamp("2014-03-18") not in s.index
+
+
+@pytest.mark.parametrize("weeks, match", [
+    ([("2014-03-19", 89.8), ("2014-03-18", 60.0)], "1 day"),            # misdated, not the known row
+    ([("2006-07-05", 19.44), ("2006-07-05", 25.0)], "appears twice"),  # repeat that disagrees
+])
+def test_bad_history_is_refused(tmp_path, weeks, match):
+    workbook(tmp_path / "h.xlsx", weeks)
+    with pytest.raises(RawError, match=match):
+        nprov.parse_history(tmp_path / "h.xlsx")
+
+
+def test_history_without_the_headline_column_is_refused(tmp_path):
+    workbook(tmp_path / "h.xlsx", [("2024-01-31", 87.36)], header=("Date", "Mean", "Other"))
+    with pytest.raises(RawError, match="does not name"):
+        nprov.parse_history(tmp_path / "h.xlsx")
+
+
 def test_registry_entry():
     s = REGISTRY[SYM]
     assert s.naaim == "NAAIM Number" and s.kind == "exposure" and s.domain == "series"
-    assert ("2024-01-31", 87.36) in s.anchors
+    assert ("2024-01-31", 87.36) in s.anchors and s.inception == "2006-07-05"

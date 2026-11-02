@@ -30,14 +30,41 @@ WHAT THE BUILD REFUSES, and writes nothing when it does:
     been seen to revise; if it does, a person should look.
   * A registry anchor that does not match.
 
+A FULL-HISTORY FILE. NAAIM sells the whole series as a spreadsheet (one sheet,
+a header row naming "Date" and "NAAIM Number", newest week first). Dropped into
+the raw directory as ``*.xlsx``, :func:`build` reads it beside the captures and
+the two must agree wherever they overlap. It is read with the standard library
+(:func:`read_xlsx`) so the producer venv needs no Excel package. The file as
+first received (2026-11-01, through 2026-07-29) had three defects, each handled
+openly rather than silently:
+
+  * Two weeks (2006-07-05, 2006-07-12) appear twice, once rounded to two places.
+    Repeats that agree to the rounding collapse to the more precise value; any
+    other repeat is refused.
+  * One row is misdated: "2014-03-18" (a Tuesday, between the 2014-03-12 and
+    2014-03-19 Wednesdays) carries the S&P 500 close 2099.50, which is the
+    2015-03-18 close (2014-03-18 closed 1872.25), and 2015-03-18 is the week the
+    file is missing. :data:`CORRECTIONS` redates that row, matched on its exact
+    value, so a corrected file simply stops matching.
+  * Three rows (2018-08-08, 2021-04-07, 2022-06-22) differ between the file's
+    "Mean/Average" and "NAAIM Number" columns. The build reads "NAAIM Number",
+    the headline the public table also publishes; the disagreement is recorded
+    in the registry note, not resolved.
+
+Every source also passes a spacing check: two weeks under five days apart are
+refused, which is how a misdated row shows itself.
+
 The other columns (the bearish and bullish extremes, the quartiles, the
-deviation) stay in the raw captures; only the headline index is a stored series.
+deviation) stay in the raw files; only the headline index is a stored series.
 """
 from __future__ import annotations
 
 import datetime as dt
 import os
+import re
 import urllib.request
+import xml.etree.ElementTree as ET
+import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Iterable, Optional
@@ -55,6 +82,10 @@ URL = "https://index.naaim.org/embeddable/table"
 # The page is served to browsers; a bare urllib agent is refused by some CDNs.
 _UA = "Mozilla/5.0 (marketdata NAAIM capture)"
 HEADER = ("Date", "NAAIM Number")
+MIN_SPACING_DAYS = 5
+# Rows the full-history file is known to misdate, keyed (date as served, exact
+# value) -> true date. See the module docstring for the evidence.
+CORRECTIONS = {("2014-03-18", 67.77057142857143): "2015-03-18"}
 
 
 def raw_root() -> Path:
@@ -64,7 +95,9 @@ def raw_root() -> Path:
 
 
 def raw_files() -> list:
-    return sorted(raw_root().glob("*.html"))
+    """Every capture (``*.html``) and full-history file (``*.xlsx``), by name."""
+    root = raw_root()
+    return sorted([*root.glob("*.html"), *root.glob("*.xlsx")])
 
 
 def fetch(*, when: Optional[dt.date] = None, timeout: int = 60) -> Path:
@@ -131,6 +164,11 @@ def parse_page(text: str, what: str) -> pd.Series:
     except (ValueError, IndexError) as e:
         raise RawError(f"{what}: a row does not parse as date, number: {e}") from e
     s = pd.Series(vals, index=pd.DatetimeIndex(dates, name="Date")).sort_index()
+    return _checked(s, what)
+
+
+def _checked(s: pd.Series, what: str) -> pd.Series:
+    """The checks every source passes, whatever its format."""
     if s.empty:
         raise RawError(f"{what}: the table has no rows")
     if s.index.duplicated().any():
@@ -138,14 +176,97 @@ def parse_page(text: str, what: str) -> pd.Series:
     if (s.abs() > 200).any():
         raise RawError(f"{what}: a value is outside -200 to 200 (min {s.min():g}, "
                        f"max {s.max():g})")
+    gaps = s.index.to_series().diff().dt.days
+    if (gaps < MIN_SPACING_DAYS).any():
+        d = gaps[gaps < MIN_SPACING_DAYS].index[0]
+        raise RawError(f"{what}: week {d.date()} is {int(gaps[d])} day(s) after the "
+                       f"week before it. A row is misdated; look before building.")
     return s
 
 
+_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_CELL = re.compile(r"([A-Z]+)(\d+)")
+
+
+def read_xlsx(path: Path) -> list:
+    """The first sheet's rows as lists of cell values (str or float, None where
+    blank), standard library only. Dates come back as Excel serial numbers."""
+    with zipfile.ZipFile(path) as z:
+        wb = ET.fromstring(z.read("xl/workbook.xml"))
+        pr = wb.find(f"{_NS}workbookPr")
+        if pr is not None and pr.get("date1904") in ("1", "true"):
+            raise RawError(f"{path.name}: 1904 date system, not supported")
+        shared = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            for si in ET.fromstring(z.read("xl/sharedStrings.xml")).iter(f"{_NS}si"):
+                shared.append("".join(x.text or "" for x in si.iter(f"{_NS}t")))
+        sheets = sorted(n for n in z.namelist() if re.fullmatch(r"xl/worksheets/sheet\d+\.xml", n))
+        if not sheets:
+            raise RawError(f"{path.name}: no worksheet")
+        root = ET.fromstring(z.read(sheets[0]))
+    rows = []
+    for row in root.iter(f"{_NS}row"):
+        cells = {}
+        for c in row.iter(f"{_NS}c"):
+            col = 0
+            for ch in _CELL.fullmatch(c.get("r")).group(1):
+                col = col * 26 + ord(ch) - 64
+            kind, v = c.get("t"), c.find(f"{_NS}v")
+            if kind == "inlineStr":
+                cells[col - 1] = "".join(x.text or "" for x in c.iter(f"{_NS}t"))
+            elif v is None or v.text is None:
+                continue
+            elif kind == "s":
+                cells[col - 1] = shared[int(v.text)]
+            elif kind in ("str", "e"):
+                cells[col - 1] = v.text
+            else:
+                cells[col - 1] = float(v.text)
+        rows.append([cells.get(i) for i in range(max(cells) + 1)] if cells else [])
+    return rows
+
+
+def parse_history(path: Path) -> pd.Series:
+    """The headline index by week from a full-history spreadsheet. Raises `RawError`."""
+    what = path.name
+    rows = [r for r in read_xlsx(path) if any(x is not None for x in r)]
+    head = [str(x).strip() if x is not None else "" for x in rows[0]] if rows else []
+    if not all(h in head for h in HEADER):
+        raise RawError(f"{what}: header {head[:4]} does not name {HEADER}")
+    di, vi = head.index(HEADER[0]), head.index(HEADER[1])
+    try:
+        pairs = [(pd.Timestamp("1899-12-30") + pd.Timedelta(days=float(r[di])), float(r[vi]))
+                 for r in rows[1:]]
+    except (TypeError, ValueError, IndexError) as e:
+        raise RawError(f"{what}: a row does not parse as date, number: {e}") from e
+    week = {}
+    for d, v in pairs:
+        if d in week:
+            a = week[d]
+            if abs(a - v) > 0.005:
+                raise RawError(f"{what}: week {d.date()} appears twice, as {a:g} and {v:g}")
+            week[d] = a if len(repr(a)) >= len(repr(v)) else v   # keep the unrounded one
+        else:
+            week[d] = v
+    for (served, value), true in CORRECTIONS.items():
+        d, t = pd.Timestamp(served), pd.Timestamp(true)
+        if d in week and abs(week[d] - value) <= 1e-9:
+            if t in week:
+                raise RawError(f"{what}: correction {served} -> {true} would collide "
+                               f"with a week the file already holds")
+            week[t] = week.pop(d)
+            print(f"naaim: {what}: redated {served} -> {true} (CORRECTIONS)")
+    s = pd.Series(week, dtype=float).sort_index()
+    s.index = pd.DatetimeIndex(s.index, name="Date")
+    return _checked(s, what)
+
+
 def merge_raw(files: Iterable[Path]) -> pd.Series:
-    """Every capture's weeks, which must agree wherever two captures overlap."""
+    """Every source's weeks, which must agree wherever two sources overlap."""
     merged: Optional[pd.Series] = None
     for f in files:
-        s = parse_page(f.read_text(encoding="utf-8", errors="replace"), f.name)
+        s = (parse_history(f) if f.suffix == ".xlsx"
+             else parse_page(f.read_text(encoding="utf-8", errors="replace"), f.name))
         if merged is None:
             merged = s
             continue
@@ -155,8 +276,8 @@ def merge_raw(files: Iterable[Path]) -> pd.Series:
         if bad.any():
             d = common[bad][0]
             raise RawError(f"{f.name}: week {d.date()} reads {s.loc[d]:g}, an earlier "
-                           f"capture read {merged.loc[d]:g}. NAAIM revised it, or one "
-                           f"capture is bad; look before building.")
+                           f"source read {merged.loc[d]:g}. NAAIM revised it, or one "
+                           f"source is bad; look before building.")
         merged = pd.concat([merged, s.loc[s.index.difference(merged.index)]]).sort_index()
     if merged is None:
         raise RawError(f"no raw captures under {raw_root()}; run --fetch-naaim first")
@@ -225,7 +346,7 @@ def build(symbols: Optional[Iterable[str]] = None, *,
         print(f"naaim: REFUSED -- {e}")
         return {"kind": kind, "ok": False, "partial": False, "wrote": 0,
                 "failed": len(targets), "errors": [("naaim", str(e))]}
-    print(f"naaim: {len(raw_files())} capture(s), {len(weeks)} weeks, "
+    print(f"naaim: {len(raw_files())} raw file(s), {len(weeks)} weeks, "
           f"{weeks.index.min().date()} to {weeks.index.max().date()}")
     accept = set(accept_restatement or ())
     wrote = failed = 0
