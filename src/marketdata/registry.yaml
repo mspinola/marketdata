@@ -395,3 +395,11 @@ Investor Sentiment:
       "1987-07-24": 0.14
       "2026-10-29": 0.414414
     note: "AAII Sentiment Survey, share bearish, weekly."
+  NAAIM_EXPOSURE:
+    naaim: "NAAIM Number"
+    kind: exposure
+    inception: "2024-01-31"
+    anchors:
+      "2024-01-31": 87.36
+      "2026-07-29": 79.70
+    note: "NAAIM Exposure Index, weekly mean equity exposure of active managers, -200 (leveraged short) to 200 (leveraged long). Built from the FREE public table, which runs three months behind and about 130 weeks deep, captured weekdays by the Windows equities task (--fetch-naaim --build-naaim) so the stored history grows past the table's window. `inception` is the first capture's earliest week, not the index's 2006 start; the full history is a paid NAAIM subscription. A later full-history file would have to match these weeks exactly, and should reproduce CEIC's public summary of the full series (read 2026-11-01): 1,046 weeks from 2006-07-05 to 2026-07-29, high 120.556 on 2017-12-13, low -3.561 on 2011-10-05."
