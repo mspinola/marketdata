@@ -24,8 +24,9 @@ import yaml
 # can. cboe is last on purpose: it serves indices Yahoo also carries, and must only
 # win by explicit `price_source`, never by being tried first.
 # tradingview serves only symbols that carry an explicit `tradingview` key (the
-# `series` domain), so its position is immaterial to every other symbol.
-PRICE_SOURCES = ("yfinance", "norgate", "databento", "tradingview", "cboe")
+# `series` domain), so its position is immaterial to every other symbol. aaii is
+# the same: it serves only symbols carrying an explicit `aaii` key.
+PRICE_SOURCES = ("yfinance", "norgate", "databento", "tradingview", "aaii", "cboe")
 
 # Instrument domains. The domain sets the adjustment axis (see adjust.DOMAIN_TIERS)
 # and is a path component in the store, so a futures ES and an equity ES could
@@ -40,8 +41,10 @@ DEFAULT_DOMAIN = "equities"
 
 # What a `series` reading is, which fixes the range the producer validates it
 # against: a percent sits in 0-100, a count is a non-negative integer, a ratio is a
-# positive number with a loose ceiling. Producer-side only; the store does not care.
-SERIES_KINDS = ("percent", "count", "ratio")
+# positive number with a loose ceiling, a fraction sits in 0-1 (a share the vendor
+# publishes as a decimal, stored that way rather than rescaled). Producer-side
+# only; the store does not care.
+SERIES_KINDS = ("percent", "count", "ratio", "fraction")
 
 
 @dataclass(frozen=True)
@@ -67,6 +70,9 @@ class Symbol:
     # the same reason as `cboe`: only the `series` domain lives there, and a defaulted
     # value would route every symbol to a vendor that serves none of them.
     tradingview: Optional[str] = None
+    # AAII sentiment survey column header ("Bullish") in the member spreadsheet.
+    # NEVER defaulted, for the same reason as `cboe`.
+    aaii: Optional[str] = None
     price_source: Optional[str] = None
     inception: Optional[str] = None
     note: Optional[str] = None
@@ -102,6 +108,7 @@ _CLASS_DOMAIN = {
     "Crypto": "futures",
     "Market Breadth": "series",
     "Options Sentiment": "series",
+    "Investor Sentiment": "series",
 }
 
 
@@ -185,6 +192,7 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
                 databento=attrs.get("databento", internal if dom == "futures" else None),
                 cboe=attrs.get("cboe"),
                 tradingview=attrs.get("tradingview"),
+                aaii=attrs.get("aaii"),
                 price_source=_validate_source(attrs.get("price_source"), internal),
                 inception=attrs.get("inception"),
                 note=attrs.get("note"),
@@ -194,8 +202,8 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
             if resolve_source(sym) is None:
                 raise ValueError(
                     f"marketdata registry: symbol '{internal}' has no vendor that can "
-                    f"serve it (yahoo, norgate, databento, tradingview and cboe are "
-                    f"all null).")
+                    f"serve it (yahoo, norgate, databento, tradingview, cboe and aaii "
+                    f"are all null).")
             registry[internal] = sym
     return registry
 
@@ -211,6 +219,8 @@ def _can_serve(sym: Symbol, source: str) -> bool:
         return sym.cboe is not None
     if source == "tradingview":
         return sym.tradingview is not None
+    if source == "aaii":
+        return sym.aaii is not None
     raise ValueError(f"unknown price source {source!r}; expected one of {PRICE_SOURCES}")
 
 
