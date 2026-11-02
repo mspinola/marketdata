@@ -211,6 +211,16 @@ raw files are producer-internal and outside every sync. Rationale and the
 guards: `providers/tradingview.py`, `docs/design/breadth-domain-scoping.md` and
 cot-analyzer's `docs/design/tradingview-breadth-scoping.md`.
 
+The domain has a second, weekly producer: the AAII Sentiment Survey
+(`AAII_BULLISH`, `AAII_NEUTRAL`, `AAII_BEARISH`, from July 1987, stored as the
+decimals AAII publishes). Its history is a member spreadsheet behind an AAII
+login, so a person downloads `sentiment.xls` and runs
+`marketdata-update --build-aaii PATH` (needs the `aaii` extra for `xlrd`). Same
+append-only and anchor rules as the TradingView build. The spreadsheet is AAII
+member data: it is never committed here, and the built series lives only in the
+store. Seed it on the Windows store, since the nightly mirror deletes anything
+the Mac holds alone. Guards: `providers/aaii.py`.
+
 ```mermaid
 flowchart LR
   subgraph eq["EQUITIES: one stored frame"]

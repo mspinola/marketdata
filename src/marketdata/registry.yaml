@@ -361,3 +361,37 @@ Options Sentiment:
     kind: ratio
     inception: "2007-01-23"
     note: "Cboe equity-only put/call ratio, daily. Excludes index options, so it reads retail and single-stock hedging more than the total does."
+
+# AAII Sentiment Survey: the weekly share of AAII members bullish, neutral and
+# bearish on stocks over the next six months. Source is the member spreadsheet
+# (sentiment.xls), which a person downloads with an AAII login and feeds to
+# `marketdata-update --build-aaii PATH`; nothing fetches it. The file is AAII
+# member data and is never committed to any repo: it lives only in the store.
+# Weekly, dated by AAII's "Reported Date" (the Thursday the result is published),
+# so a reading is known on its own index date. Stored as the decimals AAII
+# publishes (0.36, not 36). The three legs of a week sum to 1.
+Investor Sentiment:
+  AAII_BULLISH:
+    aaii: "Bullish"
+    kind: fraction
+    inception: "1987-07-24"
+    anchors:
+      "1987-07-24": 0.36
+      "2026-10-29": 0.378378
+    note: "AAII Sentiment Survey, share bullish on stocks over six months, weekly. Named on the 2026-09-20 CMR call as a read he uses (bearish readings while the index sits near its high); npf docs/npf/l3_sentiment_candidate.md. Three weeks in the file carry no reading and are not stored."
+  AAII_NEUTRAL:
+    aaii: "Neutral"
+    kind: fraction
+    inception: "1987-07-24"
+    anchors:
+      "1987-07-24": 0.5
+      "2026-10-29": 0.207207
+    note: "AAII Sentiment Survey, share neutral, weekly."
+  AAII_BEARISH:
+    aaii: "Bearish"
+    kind: fraction
+    inception: "1987-07-24"
+    anchors:
+      "1987-07-24": 0.14
+      "2026-10-29": 0.414414
+    note: "AAII Sentiment Survey, share bearish, weekly."

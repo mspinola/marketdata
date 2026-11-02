@@ -131,6 +131,13 @@ def main(argv=None) -> int:
                         "into a raw file in the connector's shape, so the same "
                         "--build-tradingview guards apply. No network. Run the build "
                         "afterwards (--expect-session none for an old export).")
+    p.add_argument("--build-aaii", metavar="PATH",
+                   help="series domain, no network: build the AAII Sentiment Survey "
+                        "series (AAII_BULLISH / NEUTRAL / BEARISH) from a sentiment.xls "
+                        "downloaded with an AAII member login. Appends only weeks the "
+                        "store lacks; a week the store holds at a different value is "
+                        "refused unless named in --accept-restatement. Never commit the "
+                        "file: it is AAII member data.")
     p.add_argument("--expect-session", metavar="YYYY-MM-DD|none",
                    help="with --build-tradingview: the session the raw files must reach "
                         "and must not pass. Default: the latest weekday whose 16:30 ET "
@@ -159,10 +166,11 @@ def main(argv=None) -> int:
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
-            or args.tradingview_csv):
+            or args.tradingview_csv or args.build_aaii):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
-                "--reconcile-databento, --build-tradingview or --tradingview-csv")
+                "--reconcile-databento, --build-tradingview, --tradingview-csv or "
+                "--build-aaii")
     if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
         p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
                 "--symbols entry, the internal name the export belongs to.")
@@ -177,9 +185,9 @@ def main(argv=None) -> int:
         p.error("--expect-session gates the TradingView build. Pass it with "
                 "--build-tradingview.")
     if args.accept_restatement is not None:
-        if not args.build_tradingview:
-            p.error("--accept-restatement resolves a TradingView build refusal. Pass "
-                    "it with --build-tradingview.")
+        if not (args.build_tradingview or args.build_aaii):
+            p.error("--accept-restatement resolves a series build refusal. Pass it "
+                    "with --build-tradingview or --build-aaii.")
         from .registry import REGISTRY
         unknown = [s for s in args.accept_restatement
                    if s not in REGISTRY or REGISTRY[s].domain != "series"]
@@ -378,6 +386,11 @@ def main(argv=None) -> int:
         if expect is not None and expect.lower() == "none":
             expect = tprov.NO_GATE
         results.append(tprov.build(args.symbols, expect_session=expect,
+                                   accept_restatement=args.accept_restatement))
+
+    if args.build_aaii:
+        from .providers import aaii as aprov
+        results.append(aprov.build(args.build_aaii, args.symbols,
                                    accept_restatement=args.accept_restatement))
 
     for res in results:

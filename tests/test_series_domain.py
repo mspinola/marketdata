@@ -37,15 +37,20 @@ def test_series_is_a_domain_with_one_stored_raw_tier():
         check_tier("backadj", D)
 
 
-def test_registry_series_symbols_name_tradingview_and_no_other_vendor():
+def test_registry_series_symbols_name_one_series_vendor_and_no_price_vendor():
     series = [s for s in REGISTRY.values() if s.domain == D]
     assert len(series) >= 11
     for s in series:
-        assert s.tradingview and ":" in s.tradingview, s.internal
         assert s.yahoo is None and s.norgate is None and s.databento is None, s.internal
         assert s.kind in SERIES_KINDS, s.internal
-        assert resolve_source(s) == "tradingview", s.internal
-        assert _can_serve(s, "tradingview") and not _can_serve(s, "yfinance")
+        assert not _can_serve(s, "yfinance")
+        if s.aaii:
+            assert s.tradingview is None, s.internal
+            assert resolve_source(s) == "aaii", s.internal
+        else:
+            assert s.tradingview and ":" in s.tradingview, s.internal
+            assert resolve_source(s) == "tradingview", s.internal
+            assert _can_serve(s, "tradingview")
     fomo = REGISTRY[SYM]
     assert fomo.tradingview == "INDEX:NCFD" and fomo.kind == "percent"
     assert ("2026-07-29", 48.05) in fomo.anchors
@@ -54,7 +59,8 @@ def test_registry_series_symbols_name_tradingview_and_no_other_vendor():
 def test_non_series_symbols_carry_no_series_attributes():
     for s in REGISTRY.values():
         if s.domain != D:
-            assert s.tradingview is None and s.kind is None and s.anchors == (), s.internal
+            assert s.tradingview is None and s.aaii is None, s.internal
+            assert s.kind is None and s.anchors == (), s.internal
 
 
 def test_a_series_symbol_stores_flat_under_its_domain_and_vendor(tmp_store):
