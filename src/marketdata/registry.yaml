@@ -194,6 +194,12 @@ Equity Index Futures:
   RTY: {norgate: "&RTY", yahoo: null}
   EMD: {norgate: "&EMD", yahoo: null, note: "E-mini S&P MidCap 400 (CME)"}
   NKD: {norgate: "&NKD", yahoo: null, note: "Nikkei 225, $-denominated (CME)"}
+  # Non-US index futures. Added 2026-10-30 for the AHLT book in S&P-equivalent risk (dbmf-tracker). Prices are in the
+  # contract's own currency; Norgate's catalogue has no TOPIX, so NIY stands in for it there.
+  FDAX: {norgate: "&FDAX", yahoo: null, databento: null, note: "DAX (Eurex), EUR"}
+  FESX: {norgate: "&FESX", yahoo: null, databento: null, note: "EURO STOXX 50 (Eurex), EUR"}
+  LFT:  {norgate: "&LFT",  yahoo: null, databento: null, note: "FTSE 100 (ICE Futures Europe), GBP"}
+  NIY:  {norgate: "&NIY",  yahoo: null, databento: null, note: "Nikkei 225, yen-denominated (CME)"}
 
 Metals:
   GC: {norgate: "&GC", yahoo: null}
@@ -208,6 +214,7 @@ Energies:
   HO:  {norgate: "&HO",  yahoo: null}
   NG:  {norgate: "&NG",  yahoo: null}
   WBS: {norgate: "&WBS", yahoo: null, databento: null, note: "WTI Crude Oil (ICE Futures Europe). Not a duplicate of CL — different holder base."}
+  BRN: {norgate: "&BRN", yahoo: null, databento: null, note: "Brent Crude Oil (ICE Futures Europe). Added 2026-10-30 for the AHLT book in S&P-equivalent risk (dbmf-tracker)."}
 
 Grains:
   ZC: {norgate: "&ZC", yahoo: null}
@@ -238,6 +245,11 @@ Fixed Income:
   ZT: {norgate: "&ZT", yahoo: null}
   ZF: {norgate: "&ZF", yahoo: null}
   ZB: {norgate: "&ZB", yahoo: null}
+  # Added 2026-10-30 for the AHLT book in S&P-equivalent risk (dbmf-tracker).
+  UB:   {norgate: "&UB",   yahoo: null, databento: null, note: "Ultra U.S. T-Bond (CBOT)"}
+  FGBL: {norgate: "&FGBL", yahoo: null, databento: null, note: "Euro-Bund (Eurex), EUR"}
+  FGBM: {norgate: "&FGBM", yahoo: null, databento: null, note: "Euro-Bobl (Eurex), EUR"}
+  LLG:  {norgate: "&LLG",  yahoo: null, databento: null, note: "Long Gilt (ICE Futures Europe), GBP"}
 
 Softs:
   SB:  {norgate: "&SB",  yahoo: null, databento: null}
