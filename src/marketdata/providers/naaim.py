@@ -56,6 +56,34 @@ refused, which is how a misdated row shows itself.
 
 The other columns (the bearish and bullish extremes, the quartiles, the
 deviation) stay in the raw files; only the headline index is a stored series.
+
+PROVISIONAL WEEKS, A SEPARATE SERIES. The free table runs three months behind and
+the current readings are subscriber-only, so the weeks between the official
+series' end and today come from elsewhere: ``provisional.csv`` in the raw
+directory, kept by hand (columns ``week, value, source``; ``week`` is NAAIM's
+survey date). They are built into ``NAAIM_EXPOSURE_PROVISIONAL`` (registry key
+``naaim: provisional``), never into ``NAAIM_EXPOSURE``, for two reasons:
+
+  * The official build never rewrites a stored week. An approximate value stored
+    there would make every later official week a restatement the build refuses.
+  * Studies read ``NAAIM_EXPOSURE`` (npf's NAAIM study among them). Hand values
+    in it would change what a frozen study reads.
+
+Unlike the official series this one is REWRITTEN on every build, from the file
+and the official series' current end: it holds only the file's weeks AFTER that
+end, so each provisional week drops out as NAAIM publishes it, with no step by
+anyone. A file week the official series now covers is compared with it and the
+difference printed, so the provisional source keeps being measured. The file is
+refused, and nothing written, on a week or value that does not parse, a value
+outside -200 to 200, a repeated week, or two weeks under five days apart.
+
+The first file (2026-11-06) backfilled 2026-08-12 to 2026-11-04: 12 weeks read off
+a StockCharts weekly chart image by bar height, and 2026-11-04 from the chart's
+own label. Read the same way, the chart's bars matched the official series to a
+median 0.19 points over 249 shared weeks (90% within 0.51). StockCharts' own
+series differs from NAAIM's on a few weeks (2022-05-04 drawn at about 57 against
+31.76, 2024-11-27 drawn at the previous week's value), so the source, not only
+the reading, carries error. ``scripts/read_naaim_chart.py`` is the reproducer.
 """
 from __future__ import annotations
 
@@ -86,6 +114,9 @@ MIN_SPACING_DAYS = 5
 # Rows the full-history file is known to misdate, keyed (date as served, exact
 # value) -> true date. See the module docstring for the evidence.
 CORRECTIONS = {("2014-03-18", 67.77057142857143): "2015-03-18"}
+# The registry `naaim:` value of the hand-kept provisional series, and its file.
+PROVISIONAL = "provisional"
+PROVISIONAL_FILE = "provisional.csv"
 
 
 def raw_root() -> Path:
@@ -288,8 +319,84 @@ def _targets(symbols: Optional[Iterable[str]] = None) -> list:
     default = default_price_source()
     wanted = set(symbols) if symbols is not None else None
     return [s for s in all_symbols()
-            if s.domain == DOMAIN and s.naaim and resolve_source(s, default) == NAME
+            if s.domain == DOMAIN and s.naaim and s.naaim != PROVISIONAL
+            and resolve_source(s, default) == NAME
             and (wanted is None or s.internal in wanted)]
+
+
+def _provisional_targets(symbols: Optional[Iterable[str]] = None) -> list:
+    wanted = set(symbols) if symbols is not None else None
+    return [s for s in all_symbols()
+            if s.domain == DOMAIN and s.naaim == PROVISIONAL
+            and (wanted is None or s.internal in wanted)]
+
+
+def read_provisional(path: Path) -> pd.Series:
+    """The hand-kept file as a week -> value series, oldest first. Raises `RawError`
+    on anything it cannot read as written."""
+    what = path.name
+    try:
+        df = pd.read_csv(path, dtype=str, comment="#")
+    except Exception as e:  # noqa: BLE001 -- any unreadable file is one refusal
+        raise RawError(f"{what}: unreadable ({e})") from e
+    missing = [c for c in ("week", "value", "source") if c not in df.columns]
+    if missing:
+        raise RawError(f"{what}: needs columns week, value, source; missing {missing}")
+    weeks = pd.to_datetime(df["week"].str.strip(), format="%Y-%m-%d", errors="coerce")
+    values = pd.to_numeric(df["value"].str.strip(), errors="coerce")
+    bad = weeks.isna() | values.isna()
+    if bad.any():
+        row = df[bad].iloc[0]
+        raise RawError(f"{what}: row week={row['week']!r} value={row['value']!r} "
+                       f"does not parse")
+    s = pd.Series(values.to_numpy(dtype=float), index=pd.DatetimeIndex(weeks))
+    if s.index.duplicated().any():
+        raise RawError(f"{what}: week {s.index[s.index.duplicated()][0].date()} "
+                       f"appears twice")
+    return _checked(s.sort_index(), what)
+
+
+def build_provisional(sym: Symbol, official: str) -> dict:
+    """Rewrite `sym` from the provisional file: only weeks after the official
+    series' last week. Writes only when that differs from what is stored. Returns
+    {"weeks", "dropped", "compared", "changed"}; raises `RawError` and writes nothing
+    on a refused file."""
+    path = raw_root() / PROVISIONAL_FILE
+    hand = (read_provisional(path) if path.exists()
+            else pd.Series(dtype=float, index=pd.DatetimeIndex([])))
+    stored = store.read_bars(official, DOMAIN, NAME)
+    if stored.empty:
+        end, covered = None, pd.Series(dtype=float)
+    else:
+        idx = pd.to_datetime(stored.index).tz_localize(None).normalize()
+        closes = pd.Series(stored["Close"].to_numpy(dtype=float), index=idx)
+        end = idx.max()
+        covered = closes.reindex(hand.index).dropna()
+    keep = hand if end is None else hand[hand.index > end]
+    if len(covered):
+        diff = hand.reindex(covered.index) - covered
+        print(f"{sym.internal}: {len(covered)} provisional week(s) now official; "
+              f"provisional minus official: median abs {diff.abs().median():.2f}, "
+              f"max abs {diff.abs().max():.2f} (worst {diff.abs().idxmax().date()})")
+    out = pd.DataFrame({k: keep.astype(float) for k in OHLC})
+    out.index.name = "Date"
+    before = store.read_bars(sym.internal, DOMAIN, NAME)
+    changed = not _same(before, out)
+    if changed:
+        store.write_bars(sym.internal, out, domain=DOMAIN, source=NAME)
+    return {"weeks": len(keep), "dropped": len(hand) - len(keep),
+            "compared": len(covered), "changed": changed}
+
+
+def _same(stored: pd.DataFrame, out: pd.DataFrame) -> bool:
+    """True when the stored provisional series already holds exactly `out`. No file
+    and nothing stored is the same too, so a build with neither writes nothing."""
+    if stored.empty:
+        return out.empty
+    idx = pd.to_datetime(stored.index).tz_localize(None).normalize()
+    return (len(idx) == len(out) and (idx == out.index).all()
+            and np.allclose(stored["Close"].to_numpy(dtype=float),
+                            out["Close"].to_numpy(dtype=float), rtol=0, atol=1e-12))
 
 
 def build_symbol(sym: Symbol, weeks: pd.Series, *, accept: bool = False) -> int:
@@ -331,21 +438,53 @@ def build_symbol(sym: Symbol, weeks: pd.Series, *, accept: bool = False) -> int:
     return int(len(new))
 
 
+#: The official series the provisional one trims against.
+OFFICIAL = "NAAIM_EXPOSURE"
+
+
 def build(symbols: Optional[Iterable[str]] = None, *,
           accept_restatement: Optional[Iterable[str]] = None) -> dict:
     """Build every registry symbol that resolves to NAAIM from all raw captures.
     Local files only. Returns the producer result dict the CLI prints."""
     kind = "series_naaim"
+    official = _build_official(symbols, accept_restatement)
+    prov = _build_provisionals(symbols)
+    wrote, failed = official["wrote"] + prov["wrote"], official["failed"] + prov["failed"]
+    total = official["targets"] + prov["targets"]
+    return {"kind": kind, "ok": failed == 0, "partial": 0 < failed < total,
+            "wrote": wrote, "failed": failed,
+            "errors": official["errors"] + prov["errors"]}
+
+
+def _build_provisionals(symbols) -> dict:
+    """Every provisional symbol, after the official ones so it trims to their end."""
+    targets = _provisional_targets(symbols)
+    wrote = failed = 0
+    errors = []
+    for s in targets:
+        try:
+            got = build_provisional(s, OFFICIAL)
+        except RawError as e:
+            print(f"{s.internal}: REFUSED -- {e}")
+            failed += 1
+            errors.append((s.internal, str(e)))
+            continue
+        wrote += int(got["changed"])
+        print(f"{s.internal}: {got['weeks']} provisional week(s) after the official end"
+              f" ({got['dropped']} superseded){'' if got['changed'] else ', unchanged'}")
+    return {"targets": len(targets), "wrote": wrote, "failed": failed, "errors": errors}
+
+
+def _build_official(symbols, accept_restatement) -> dict:
     targets = _targets(symbols)
     if not targets:
-        return {"kind": kind, "ok": True, "partial": False, "wrote": 0,
-                "failed": 0, "errors": []}
+        return {"targets": 0, "wrote": 0, "failed": 0, "errors": []}
     try:
         weeks = merge_raw(raw_files())
     except RawError as e:
         print(f"naaim: REFUSED -- {e}")
-        return {"kind": kind, "ok": False, "partial": False, "wrote": 0,
-                "failed": len(targets), "errors": [("naaim", str(e))]}
+        return {"targets": len(targets), "wrote": 0, "failed": len(targets),
+                "errors": [("naaim", str(e))]}
     print(f"naaim: {len(raw_files())} raw file(s), {len(weeks)} weeks, "
           f"{weeks.index.min().date()} to {weeks.index.max().date()}")
     accept = set(accept_restatement or ())
@@ -364,5 +503,4 @@ def build(symbols: Optional[Iterable[str]] = None, *,
             print(f"{s.internal}: +{n} week(s) -> store")
         else:
             print(f"{s.internal}: already current")
-    return {"kind": kind, "ok": failed == 0, "partial": 0 < failed < len(targets),
-            "wrote": wrote, "failed": failed, "errors": errors}
+    return {"targets": len(targets), "wrote": wrote, "failed": failed, "errors": errors}

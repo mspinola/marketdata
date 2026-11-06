@@ -146,7 +146,9 @@ def main(argv=None) -> int:
     p.add_argument("--build-naaim", action="store_true",
                    help="series domain, no network: build NAAIM_EXPOSURE from every "
                         "saved capture. Captures must agree where they overlap; appends "
-                        "only weeks the store lacks.")
+                        "only weeks the store lacks. Then rebuilds "
+                        "NAAIM_EXPOSURE_PROVISIONAL from the hand-kept provisional.csv "
+                        "beside the captures, keeping only weeks after the official end.")
     p.add_argument("--expect-session", metavar="YYYY-MM-DD|none",
                    help="with --build-tradingview: the session the raw files must reach "
                         "and must not pass. Default: the latest weekday whose 16:30 ET "
