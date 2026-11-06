@@ -226,3 +226,84 @@ def test_registry_entry():
     s = REGISTRY[SYM]
     assert s.naaim == "NAAIM Number" and s.kind == "exposure" and s.domain == "series"
     assert ("2024-01-31", 87.36) in s.anchors and s.inception == "2006-07-05"
+
+
+# ── provisional weeks (hand-kept, a separate series) ─────────────────────────
+
+PROV = "NAAIM_EXPOSURE_PROVISIONAL"
+
+
+def hand(rows, header="week,value,source"):
+    """Write the hand-kept file: rows [(\"YYYY-MM-DD\", value, source), ...]."""
+    root = nprov.raw_root()
+    root.mkdir(parents=True, exist_ok=True)
+    lines = [header] + [f"{w},{v},{s}" for w, v, s in rows]
+    (root / nprov.PROVISIONAL_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def provisional():
+    return store.read_bars(PROV, "series", "naaim")
+
+
+def test_provisional_weeks_after_the_official_end_go_to_their_own_series(raw):
+    raw("2026-11-01", FIRST)                                  # official ends 2024-02-07
+    hand([("2024-02-14", 90.1, "chart"), ("2024-02-21", 88.4, "chart")])
+    res = nprov.build()
+    assert res["ok"]
+    assert list(stored().index.strftime("%Y-%m-%d")) == ["2024-01-31", "2024-02-07"]
+    got = bars.get_bars(PROV)["Close"]
+    assert list(got.index.strftime("%Y-%m-%d")) == ["2024-02-14", "2024-02-21"]
+    assert list(got) == [90.1, 88.4]
+
+
+def test_official_weeks_replace_provisional_ones_and_are_measured(raw, capsys):
+    raw("2026-11-01", FIRST)
+    hand([("2024-02-14", 90.1, "chart"), ("2024-02-21", 88.4, "chart")])
+    nprov.build()
+    raw("2026-11-02", [("02/14/2024", "90.50"), ("02/07/2024", "93.77"),
+                       ("01/31/2024", "87.36")])               # NAAIM publishes 02-14
+    capsys.readouterr()
+    assert nprov.build()["ok"]
+    assert stored()["Close"].iloc[-1] == 90.50                 # official, untouched by hand
+    assert list(provisional().index.strftime("%Y-%m-%d")) == ["2024-02-21"]
+    out = capsys.readouterr().out
+    assert "1 provisional week(s) now official" in out and "max abs 0.40" in out
+
+
+def test_an_unchanged_provisional_series_is_not_rewritten(raw):
+    raw("2026-11-01", FIRST)
+    hand([("2024-02-14", 90.1, "chart")])
+    assert nprov.build()["wrote"] == 2                         # official + provisional
+    assert nprov.build()["wrote"] == 0
+
+
+def test_no_hand_file_writes_no_provisional_series(raw):
+    raw("2026-11-01", FIRST)
+    assert nprov.build()["wrote"] == 1
+    assert provisional().empty
+
+
+@pytest.mark.parametrize("rows, header, match", [
+    ([("2024-02-14", "n/a", "chart")], "week,value,source", "does not parse"),
+    ([("02/14/2024", 90.1, "chart")], "week,value,source", "does not parse"),
+    ([("2024-02-14", 290.0, "chart")], "week,value,source", "outside -200 to 200"),
+    ([("2024-02-14", 90.1, "a"), ("2024-02-14", 90.2, "b")], "week,value,source",
+     "appears twice"),
+    ([("2024-02-14", 90.1, "a"), ("2024-02-16", 90.2, "b")], "week,value,source", "2 day"),
+    ([("2024-02-14", 90.1, "a")], "week,value,note", "missing"),
+])
+def test_a_bad_hand_file_is_refused_and_writes_nothing(raw, rows, header, match):
+    raw("2026-11-01", FIRST)
+    hand(rows, header=header)
+    res = nprov.build()
+    assert not res["ok"] and res["partial"]                    # the official build still ran
+    assert match in res["errors"][0][1]
+    assert len(stored()) == 2 and provisional().empty
+
+
+def test_the_provisional_series_is_registered_apart_from_the_official_one():
+    s = REGISTRY[PROV]
+    assert s.naaim == nprov.PROVISIONAL and s.kind == "exposure" and s.domain == "series"
+    assert PROV not in [t.internal for t in nprov._targets()]
+    assert [t.internal for t in nprov._provisional_targets()] == [PROV]
+    assert "NOT official" in s.note
