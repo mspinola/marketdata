@@ -221,6 +221,15 @@ member data: it is never committed here, and the built series lives only in the
 store. Seed it on the Windows store, since the nightly mirror deletes anything
 the Mac holds alone. Guards: `providers/aaii.py`.
 
+The weeks AAII has published since the last spreadsheet come from a hand-kept
+`_raw/aaii/provisional.csv` on the producer (one row a week, typed as the public
+results page prints it: `week,bullish,neutral,bearish,source`, the week being the
+page's Wednesday) and are built into `AAII_BULLISH_PROVISIONAL` and its two
+siblings, never into the official legs. `--build-aaii-provisional` rebuilds them
+(as does every `--build-aaii`), keeping only weeks after the official end, so each
+drops out once a newer spreadsheet is built. The page refuses an honest automated
+client, so nothing fetches it. Same caveat: build it on the Windows store.
+
 A third, `NAAIM_EXPOSURE`, comes from NAAIM's free Exposure Index table, which
 runs three months behind and about 130 weeks deep (the full history is a paid
 subscription). `marketdata-update --fetch-naaim` saves the page verbatim under

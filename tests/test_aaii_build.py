@@ -157,3 +157,126 @@ def test_cli_builds_and_scopes(tmp_store, feed):
 def test_cli_accept_restatement_needs_a_build():
     with pytest.raises(SystemExit):
         update.main(["--check", "--accept-restatement", "AAII_BULLISH"])
+
+
+# ── provisional weeks (hand-kept from the public page, a separate series) ────
+
+PROV = tuple(f"{s}_PROVISIONAL" for s in SYMS)
+
+
+def hand(rows, header="week,bullish,neutral,bearish,source"):
+    """Write the hand-kept file: rows [("YYYY-MM-DD", bull, neutral, bear), ...]."""
+    root = aprov.raw_root()
+    root.mkdir(parents=True, exist_ok=True)
+    lines = [header] + [",".join(str(x) for x in (*r, "sent_results")) for r in rows]
+    (root / aprov.PROVISIONAL_FILE).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def provisional(sym="AAII_BULLISH_PROVISIONAL"):
+    return store.read_bars(sym, "series", "aaii")
+
+
+# The public page's rows for the weeks the spreadsheet reports on 10-29 and 11-05.
+OCT_28 = ("2026-10-28", 37.8, 20.7, 41.4)
+NOV_4 = ("2026-11-04", 34.1, 17.5, 48.4)
+
+
+def test_registry_carries_three_provisional_legs_each_naming_its_official_one():
+    for sym, off in zip(PROV, SYMS):
+        s = REGISTRY[sym]
+        assert s.aaii == aprov.PROVISIONAL and s.kind == "fraction" and s.domain == "series"
+        assert aprov.official_of(s).internal == off
+    assert {s.internal for s in aprov._targets()} == set(SYMS)
+
+
+def test_public_wednesday_lands_on_the_spreadsheets_thursday(tmp_path):
+    p = tmp_path / "provisional.csv"
+    p.write_text("week,bullish,neutral,bearish,source\n"
+                 "2026-11-04, 34.1, 17.5, 48.4%, sent_results\n", encoding="utf-8")
+    got = aprov.read_provisional(p)
+    assert list(got.index) == [pd.Timestamp("2026-11-05")]
+    assert got.index[0].day_name() == "Thursday"
+    assert list(got.iloc[0]) == pytest.approx([0.341, 0.175, 0.484])
+
+
+def test_provisional_weeks_after_the_official_end_go_to_their_own_legs(tmp_store, feed):
+    hand([OCT_28, NOV_4])
+    res = aprov.build("sentiment.xls")                     # official ends 2026-10-29
+    assert res["ok"] and res["wrote"] == 6
+    assert stored("AAII_BULLISH").index.max() == pd.Timestamp("2026-10-29")
+    for sym, want in zip(PROV, (0.341, 0.175, 0.484)):
+        got = bars.get_bars(sym)["Close"]
+        assert list(got.index) == [pd.Timestamp("2026-11-05")]
+        assert got.iloc[0] == pytest.approx(want)
+    spread = (bars.get_bars(PROV[0])["Close"] - bars.get_bars(PROV[2])["Close"]) * 100
+    assert spread.iloc[0] == pytest.approx(-14.3)
+
+
+def test_a_newer_spreadsheet_supersedes_provisional_weeks_and_measures_them(
+        tmp_store, feed, capsys):
+    feed(sheet(WEEKS[:2]))                                  # official ends 1987-07-24
+    aprov.build("old.xls")
+    hand([OCT_28, NOV_4])
+    assert aprov.build_provisionals()["ok"]
+    assert len(provisional()) == 2
+    feed(sheet())                                           # now through 2026-10-29
+    capsys.readouterr()
+    assert aprov.build("new.xls")["ok"]
+    assert list(provisional().index) == [pd.Timestamp("2026-11-05")]
+    assert stored("AAII_BULLISH")["Close"].iloc[-1] == 0.378378   # official, untouched
+    out = capsys.readouterr().out
+    # 37.8 printed against 37.8378 stored: the page's rounding, measured.
+    assert "1 provisional week(s) now official" in out and "max abs 0.04" in out
+
+
+def test_a_superseded_week_with_no_official_twin_is_reported(tmp_store, feed, capsys):
+    aprov.build("sentiment.xls")
+    hand([("2026-10-21", 36.9, 17.3, 45.8)])                # official 10-22 is not in WEEKS
+    capsys.readouterr()
+    aprov.build_provisionals()
+    assert "were not compared" in capsys.readouterr().out
+    assert provisional().empty
+
+
+def test_an_unchanged_provisional_series_is_not_rewritten(tmp_store, feed):
+    aprov.build("sentiment.xls")
+    hand([NOV_4])
+    assert aprov.build_provisionals()["wrote"] == 3
+    assert aprov.build_provisionals()["wrote"] == 0
+
+
+def test_no_hand_file_writes_no_provisional_series(tmp_store, feed):
+    assert aprov.build("sentiment.xls")["wrote"] == 3
+    assert all(provisional(s).empty for s in PROV)
+
+
+@pytest.mark.parametrize("rows, header, match", [
+    ([("2026-11-04", "n/a", 17.5, 48.4)], None, "does not parse"),
+    ([("11/04/2026", 34.1, 17.5, 48.4)], None, "does not parse"),
+    ([("2026-11-05", 34.1, 17.5, 48.4)], None, "is a Thursday"),
+    ([("2026-11-04", 0.341, 0.175, 0.484)], None, "not 100"),
+    ([("2026-11-04", 34.1, 17.5, 58.4)], None, "not 100"),
+    ([("2026-11-04", 134.1, -82.5, 48.4)], None, "outside 0-100"),
+    ([NOV_4, NOV_4], None, "appears twice"),
+    ([("2026-11-04", 34.1, 17.5, 48.4)], "week,bullish,neutral,bearish", "missing"),
+])
+def test_a_bad_hand_file_is_refused_and_writes_nothing(tmp_store, feed, rows, header, match):
+    hand(rows, **({"header": header} if header else {}))
+    if header:      # the helper appends a source column; drop it to match the header
+        p = aprov.raw_root() / aprov.PROVISIONAL_FILE
+        p.write_text("\n".join(line.rsplit(",", 1)[0] for line in
+                               p.read_text().splitlines()) + "\n")
+    res = aprov.build("sentiment.xls")
+    assert not res["ok"] and res["partial"]                 # the official build still ran
+    assert match in res["errors"][0][1]
+    assert not stored("AAII_BULLISH").empty
+    assert all(provisional(s).empty for s in PROV)
+
+
+def test_cli_builds_the_provisional_legs_alone(tmp_store, feed):
+    aprov.build("sentiment.xls")
+    hand([NOV_4])
+    assert update.main(["--build-aaii-provisional"]) == 0
+    assert not provisional().empty
+    assert update.main(["--build-aaii-provisional", "--symbols",
+                        "AAII_BEARISH_PROVISIONAL"]) == 0

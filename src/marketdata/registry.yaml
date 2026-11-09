@@ -407,6 +407,18 @@ Investor Sentiment:
       "1987-07-24": 0.14
       "2026-10-29": 0.414414
     note: "AAII Sentiment Survey, share bearish, weekly."
+  AAII_BULLISH_PROVISIONAL:
+    aaii: provisional
+    kind: fraction
+    note: "NOT official. AAII_BULLISH's weeks after its last stored week, from a hand-kept file (_raw/aaii/provisional.csv on the producer, never synced or committed: week, bullish, neutral, bearish, source), each row typed as AAII's public results page prints it (aaii.com/sentimentsurvey/sent_results, one decimal of a percent). The page dates a survey by its Wednesday; the build stores it on the Thursday after, the date sentiment.xls reports it on (verified 21 of 21 shared weeks on 2026-11-09). Rewritten on every --build-aaii and --build-aaii-provisional to hold only weeks after the official end, so each drops out once a newer sentiment.xls is built; the build prints provisional minus official for every superseded week. Hand-kept because the page refuses an honest automated client (Incapsula 403). Read it only where a page marks the weeks as provisional."
+  AAII_NEUTRAL_PROVISIONAL:
+    aaii: provisional
+    kind: fraction
+    note: "NOT official. AAII_NEUTRAL's weeks after its last stored week; see AAII_BULLISH_PROVISIONAL."
+  AAII_BEARISH_PROVISIONAL:
+    aaii: provisional
+    kind: fraction
+    note: "NOT official. AAII_BEARISH's weeks after its last stored week; see AAII_BULLISH_PROVISIONAL."
   NAAIM_EXPOSURE:
     naaim: "NAAIM Number"
     kind: exposure
