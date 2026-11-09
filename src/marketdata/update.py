@@ -137,7 +137,15 @@ def main(argv=None) -> int:
                         "downloaded with an AAII member login. Appends only weeks the "
                         "store lacks; a week the store holds at a different value is "
                         "refused unless named in --accept-restatement. Never commit the "
-                        "file: it is AAII member data.")
+                        "file: it is AAII member data. Then rebuilds the provisional "
+                        "legs (AAII_*_PROVISIONAL) so they trim to the new end.")
+    p.add_argument("--build-aaii-provisional", action="store_true",
+                   help="series domain, no network: rebuild AAII_BULLISH_PROVISIONAL / "
+                        "NEUTRAL / BEARISH from the hand-kept provisional.csv under "
+                        "$MARKETDATA_AAII_RAW (else _raw/aaii under the store), keeping "
+                        "only weeks after the official legs' end. The file holds the "
+                        "public results page's rows as printed: week (the page's "
+                        "Wednesday), bullish, neutral, bearish (percent), source.")
     p.add_argument("--fetch-naaim", action="store_true",
                    help="series domain, network: save today's page of NAAIM's free "
                         "Exposure Index table (three months delayed, about 130 weeks) "
@@ -177,12 +185,12 @@ def main(argv=None) -> int:
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
-            or args.tradingview_csv or args.build_aaii or args.fetch_naaim
-            or args.build_naaim):
+            or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
+            or args.fetch_naaim or args.build_naaim):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
                 "--reconcile-databento, --build-tradingview, --tradingview-csv, "
-                "--build-aaii, --fetch-naaim or --build-naaim")
+                "--build-aaii, --build-aaii-provisional, --fetch-naaim or --build-naaim")
     if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
         p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
                 "--symbols entry, the internal name the export belongs to.")
@@ -404,6 +412,11 @@ def main(argv=None) -> int:
         from .providers import aaii as aprov
         results.append(aprov.build(args.build_aaii, args.symbols,
                                    accept_restatement=args.accept_restatement))
+
+    if args.build_aaii_provisional and not args.build_aaii:
+        # --build-aaii already rebuilds the provisional legs after the official ones.
+        from .providers import aaii as aprov
+        results.append(aprov.build_provisionals(args.symbols))
 
     if args.fetch_naaim:
         from .providers import naaim as nprov
