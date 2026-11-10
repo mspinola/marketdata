@@ -419,6 +419,62 @@ Investor Sentiment:
     aaii: provisional
     kind: fraction
     note: "NOT official. AAII_BEARISH's weeks after its last stored week; see AAII_BULLISH_PROVISIONAL."
+  AAII_ALLOC_STOCKS:
+    aaii_allocation: stocks
+    kind: fraction
+    inception: "1987-11-30"
+    anchors:
+      "1987-11-30": 0.453
+      "2026-10-31": 0.701
+    note: "AAII Asset Allocation Survey, members' average share in stocks (stock funds plus individual stocks), monthly, as AAII headlines it (three places). From asset.xls, a member download built by hand with --build-aaii-allocation PATH; never committed. Indexed on the survey month's last day, but AAII publishes it in the first days of the NEXT month (the October 2026 file was saved 2026-11-02): lag it a month for anything point-in-time. AAII's file labels February to December of 2006 and of 2007 as 2005; the build re-dates those 22 rows and prints each (providers/aaii_allocation.py, ONE REPAIR)."
+  AAII_ALLOC_BONDS:
+    aaii_allocation: bonds
+    kind: fraction
+    inception: "1987-11-30"
+    anchors:
+      "1987-11-30": 0.198
+      "2026-10-31": 0.166
+    note: "AAII Asset Allocation Survey, share in bonds (bond funds plus individual bonds), monthly. See AAII_ALLOC_STOCKS."
+  AAII_ALLOC_CASH:
+    aaii_allocation: cash
+    kind: fraction
+    inception: "1987-11-30"
+    anchors:
+      "1987-11-30": 0.349
+      "2026-10-31": 0.133
+    note: "AAII Asset Allocation Survey, share in cash, monthly. See AAII_ALLOC_STOCKS."
+  AAII_ALLOC_STOCK_FUNDS:
+    aaii_allocation: stock_funds
+    kind: fraction
+    inception: "1987-11-30"
+    anchors:
+      "1987-11-30": 0.1858960396039604
+      "2026-10-31": 0.38152
+    note: "AAII Asset Allocation Survey, share in stock funds, monthly, as given (up to six places). AAII_ALLOC_STOCKS is this plus AAII_ALLOC_INDIVIDUAL_STOCKS, rounded. See AAII_ALLOC_STOCKS."
+  AAII_ALLOC_INDIVIDUAL_STOCKS:
+    aaii_allocation: stocks_direct
+    kind: fraction
+    inception: "1987-11-30"
+    anchors:
+      "1987-11-30": 0.2674504950495049
+      "2026-10-31": 0.319197
+    note: "AAII Asset Allocation Survey, share in individual stocks (the sheet's \"Stocks\" detail column), monthly. See AAII_ALLOC_STOCKS."
+  AAII_ALLOC_BOND_FUNDS:
+    aaii_allocation: bond_funds
+    kind: fraction
+    inception: "1987-11-30"
+    anchors:
+      "1987-11-30": 0.08753465346534654
+      "2026-10-31": 0.109143
+    note: "AAII Asset Allocation Survey, share in bond funds, monthly. See AAII_ALLOC_STOCKS."
+  AAII_ALLOC_INDIVIDUAL_BONDS:
+    aaii_allocation: bonds_direct
+    kind: fraction
+    inception: "1987-11-30"
+    anchors:
+      "1987-11-30": 0.1105
+      "2026-10-31": 0.057073
+    note: "AAII Asset Allocation Survey, share in individual bonds (the sheet's \"Bonds\" detail column), monthly. See AAII_ALLOC_STOCKS."
   NAAIM_EXPOSURE:
     naaim: "NAAIM Number"
     kind: exposure

@@ -146,6 +146,13 @@ def main(argv=None) -> int:
                         "only weeks after the official legs' end. The file holds the "
                         "public results page's rows as printed: week (the page's "
                         "Wednesday), bullish, neutral, bearish (percent), source.")
+    p.add_argument("--build-aaii-allocation", metavar="PATH",
+                   help="series domain, no network: build the AAII Asset Allocation "
+                        "Survey series (AAII_ALLOC_*, monthly) from an asset.xls "
+                        "downloaded with an AAII member login. Appends only months the "
+                        "store lacks; a month the store holds at a different value is "
+                        "refused unless named in --accept-restatement. Never commit the "
+                        "file: it is AAII member data.")
     p.add_argument("--fetch-naaim", action="store_true",
                    help="series domain, network: save today's page of NAAIM's free "
                         "Exposure Index table (three months delayed, about 130 weeks) "
@@ -186,11 +193,12 @@ def main(argv=None) -> int:
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
             or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
-            or args.fetch_naaim or args.build_naaim):
+            or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
                 "--reconcile-databento, --build-tradingview, --tradingview-csv, "
-                "--build-aaii, --build-aaii-provisional, --fetch-naaim or --build-naaim")
+                "--build-aaii, --build-aaii-provisional, --build-aaii-allocation, "
+                "--fetch-naaim or --build-naaim")
     if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
         p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
                 "--symbols entry, the internal name the export belongs to.")
@@ -205,9 +213,11 @@ def main(argv=None) -> int:
         p.error("--expect-session gates the TradingView build. Pass it with "
                 "--build-tradingview.")
     if args.accept_restatement is not None:
-        if not (args.build_tradingview or args.build_aaii or args.build_naaim):
+        if not (args.build_tradingview or args.build_aaii or args.build_aaii_allocation
+                or args.build_naaim):
             p.error("--accept-restatement resolves a series build refusal. Pass it "
-                    "with --build-tradingview, --build-aaii or --build-naaim.")
+                    "with --build-tradingview, --build-aaii, --build-aaii-allocation "
+                    "or --build-naaim.")
         from .registry import REGISTRY
         unknown = [s for s in args.accept_restatement
                    if s not in REGISTRY or REGISTRY[s].domain != "series"]
@@ -417,6 +427,11 @@ def main(argv=None) -> int:
         # --build-aaii already rebuilds the provisional legs after the official ones.
         from .providers import aaii as aprov
         results.append(aprov.build_provisionals(args.symbols))
+
+    if args.build_aaii_allocation:
+        from .providers import aaii_allocation as alprov
+        results.append(alprov.build(args.build_aaii_allocation, args.symbols,
+                                    accept_restatement=args.accept_restatement))
 
     if args.fetch_naaim:
         from .providers import naaim as nprov
