@@ -230,6 +230,18 @@ siblings, never into the official legs. `--build-aaii-provisional` rebuilds them
 drops out once a newer spreadsheet is built. The page refuses an honest automated
 client, so nothing fetches it. Same caveat: build it on the Windows store.
 
+AAII's monthly Asset Allocation Survey sits beside it: members' average split
+between stocks, bonds and cash, from November 1987 (`AAII_ALLOC_STOCKS`, `_BONDS`,
+`_CASH` as AAII headlines them, plus the fund/direct split `_STOCK_FUNDS`,
+`_INDIVIDUAL_STOCKS`, `_BOND_FUNDS`, `_INDIVIDUAL_BONDS`). Same arrangement: a
+person downloads the member spreadsheet `asset.xls` and runs
+`marketdata-update --build-aaii-allocation PATH`, never committed, built on the
+Windows store. Each month is indexed on its last day but published early the next
+month, so lag it a month for anything point-in-time. AAII's file labels February
+to December of 2006 and of 2007 as 2005; the build re-dates those rows (only that
+pattern: a row whose month is the next one expected) and prints each. Guards:
+`providers/aaii_allocation.py`.
+
 A third, `NAAIM_EXPOSURE`, comes from NAAIM's free Exposure Index table, which
 runs three months behind and about 130 weeks deep (the full history is a paid
 subscription). `marketdata-update --fetch-naaim` saves the page verbatim under
