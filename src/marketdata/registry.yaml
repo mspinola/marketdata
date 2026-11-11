@@ -64,6 +64,10 @@ MSCI International ETF:
     yahoo: "EEM"
     inception: "2003-04-07"
     note: "iShares MSCI Emerging Markets. Price proxy for the ICE MSCI EM future (COT symbol MME)."
+  EWJ:
+    yahoo: "EWJ"
+    inception: "1996-03-18"
+    note: "iShares MSCI Japan, launched 1996-03-12; inception is the first bar Yahoo serves. NOT a COT price proxy, unlike the two rows above: Japan's COT markets (NKD, NIY) have their own Norgate futures. One reverse split, 1-for-4 on 2016-11-07, so the raw tier differs from split before that date. Semi-annual distributions; total tier for any return comparison."
 
 Treasury ETF:
   TLT:
