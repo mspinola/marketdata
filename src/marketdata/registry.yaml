@@ -129,6 +129,35 @@ Crypto ETF:
     inception: "2024-01-11"
     note: "iShares Bitcoin Trust. Asset row on cot-analyzer's market internals page. Spot bitcoin, not the CME future; nothing prices BTC's COT off it."
 
+# The managed-futures funds the fund-monitor pages track (dbmf-tracker: dbmf., ahlt.,
+# orr.bluemagicai.com). Registered for their daily price line against the S&P, which
+# must be read on the `total` tier: AHLT and DBMF distribute (DBMF 19 times through
+# 2026-09, including year-end payments above a dollar), so a split-tier line understates
+# the fund against a total-return index. Nothing is stored for that: `total` is derived
+# on read from the dated Dividends column, like every other equity here. `inception` is
+# the first bar Yahoo serves, one session after each fund's stated launch date (measured
+# 2026-11-10), which is the same convention as the rows above. Yahoo's Capital Gains
+# column is empty for all four, so the default total tier already holds every
+# distribution it reports. The consumer is in another repo, so a clean grep of this one
+# is not evidence these are unused (see the Volatility Index note below).
+Managed Futures ETF:
+  DBMF:
+    yahoo: "DBMF"
+    inception: "2019-05-08"
+    note: "iMGP DBi Managed Futures Strategy ETF, launched 2019-05-07. Quarterly distributions plus a large year-end one; total tier for any return comparison."
+  AHLT:
+    yahoo: "AHLT"
+    inception: "2023-08-31"
+    note: "American Beacon AHL Trend ETF, launched 2023-08-30. Two distributions so far (2023-12-21, 2025-12-22); total tier for any return comparison."
+  ORR:
+    yahoo: "ORR"
+    inception: "2025-01-15"
+    note: "Militia Long/Short Equity ETF, launched 2025-01-14. No distribution through 2026-11-10, so total equals split until one lands."
+  SDMF:
+    yahoo: "SDMF"
+    inception: "2026-02-19"
+    note: "Daily line for the SDMF panel on the fund-monitor pages, from the first bar Yahoo serves. Distributions 2026-06-25 and 2026-09-25."
+
 # KEPT DELIBERATELY. These four have been removed twice, on 2026-07-xx and again on
 # 2026-08-21, both times on the belief that nothing used them. Something does:
 # npf/trading_riot maps each to a realized counterpart (VIX->ES, VXN->NQ, OVX->CL,
