@@ -61,7 +61,8 @@ PROVISIONAL WEEKS, A SEPARATE SERIES. The free table runs three months behind an
 the current readings are subscriber-only, so the weeks between the official
 series' end and today come from elsewhere: ``provisional.csv`` in the raw
 directory, kept by hand (columns ``week, value, source``; ``week`` is NAAIM's
-survey date). They are built into ``NAAIM_EXPOSURE_PROVISIONAL`` (registry key
+survey date), a row a week added with ``--add-naaim-week VALUE``
+(:func:`add_provisional_week`). They are built into ``NAAIM_EXPOSURE_PROVISIONAL`` (registry key
 ``naaim: provisional``), never into ``NAAIM_EXPOSURE``, for two reasons:
 
   * The official build never rewrites a stored week. An approximate value stored
@@ -354,6 +355,71 @@ def read_provisional(path: Path) -> pd.Series:
         raise RawError(f"{what}: week {s.index[s.index.duplicated()][0].date()} "
                        f"appears twice")
     return _checked(s.sort_index(), what)
+
+
+#: The `source` column a row added by `add_provisional_week` carries: the value
+#: label StockCharts prints on its `!NAAIM` chart, the weekly reading's free source.
+PUBLIC_SOURCE = "stockcharts chart label"
+#: NAAIM's usual survey day. 1038 of the 1048 official weeks through 2026-08-05
+#: fall on it; holiday weeks move to the Thursday (after July 4, Christmas) or the
+#: Tuesday (Thanksgiving), so other days are allowed when named, never defaulted.
+SURVEY_WEEKDAY = 2
+
+
+def latest_survey_week(today: Optional[dt.date] = None) -> dt.date:
+    """The latest Wednesday on or before `today`: on a Thursday, yesterday's survey."""
+    today = today or dt.date.today()
+    return today - dt.timedelta(days=(today.weekday() - SURVEY_WEEKDAY) % 7)
+
+
+def add_provisional_week(value: float, *, week: Optional[dt.date] = None,
+                         today: Optional[dt.date] = None,
+                         source: str = PUBLIC_SOURCE) -> str:
+    """Append one week's reading to ``provisional.csv`` (created if absent) and
+    return what was done, in words. The week defaults to `latest_survey_week`; a
+    holiday week's Thursday or Tuesday must be named. The new file must pass
+    `read_provisional` (a parseable value inside -200 to 200, weeks at least five
+    days apart) or nothing is written. Re-adding a week with the same value changes
+    nothing; with another value it is refused (a typo is fixed in the file, by
+    hand, where it shows). A value identical to the previous week's is refused
+    too: that is the label before it updated, typed under the new date. Raises
+    `RawError`."""
+    week = week or latest_survey_week(today)
+    value = round(float(value), 2)
+    path = raw_root() / PROVISIONAL_FILE
+    # Bytes, not read_text: universal newlines would fold a CRLF file to LF.
+    text = path.read_bytes().decode("utf-8") if path.exists() else ""
+    newline = "\r\n" if "\r\n" in text else "\n"
+    if not text.strip():
+        text = "week,value,source" + newline
+    elif not text.endswith(("\n", "\r")):
+        text += newline
+    have = read_provisional(path) if path.exists() and text.count("\n") > 1 else None
+    stamp = pd.Timestamp(week)
+    if have is not None and stamp in have.index:
+        old = round(float(have.loc[stamp]), 2)
+        if old == value:
+            return f"week {week} is already in {path.name} at {value:.2f}; nothing to add"
+        raise RawError(f"week {week} is already in {path.name} at {old:.2f}, not "
+                       f"{value:.2f}. Fix that row by hand if the reading changed.")
+    if have is not None and len(have):
+        prev = have[have.index < stamp]
+        if len(prev) and round(float(prev.iloc[-1]), 2) == value:
+            raise RawError(
+                f"{value:.2f} is week {prev.index[-1].date()}'s reading too. The label "
+                f"has probably not updated to week {week} yet; try again later.")
+    new = text + f"{week:%Y-%m-%d},{value:.2f},{source}" + newline
+    # Checked as a whole before it replaces the file, so a bad row writes nothing.
+    tmp = path.with_name(path.name + ".new")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_bytes(new.encode("utf-8"))
+    try:
+        read_provisional(tmp)
+    except RawError as e:
+        tmp.unlink()
+        raise RawError(str(e).replace(tmp.name, path.name)) from None
+    os.replace(tmp, path)
+    return f"added week {week} at {value:.2f} to {path.name}"
 
 
 def build_provisional(sym: Symbol, official: str) -> dict:

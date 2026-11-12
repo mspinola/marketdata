@@ -180,6 +180,18 @@ def main(argv=None) -> int:
                         "only weeks the store lacks. Then rebuilds "
                         "NAAIM_EXPOSURE_PROVISIONAL from the hand-kept provisional.csv "
                         "beside the captures, keeping only weeks after the official end.")
+    p.add_argument("--add-naaim-week", type=float, metavar="VALUE",
+                   help="series domain, no network: append this week's NAAIM Exposure "
+                        "reading (as StockCharts' !NAAIM label prints it, 72.90) to the "
+                        "hand-kept provisional.csv, then build as --build-naaim does. "
+                        "The week is the latest Wednesday on or before today (on a "
+                        "Thursday, yesterday's survey) unless --naaim-week names it. "
+                        "Refuses a week already in the file at another value and a value "
+                        "identical to the week before (the label not yet updated).")
+    p.add_argument("--naaim-week", metavar="YYYY-MM-DD",
+                   type=lambda v: dt.date.fromisoformat(v),
+                   help="with --add-naaim-week: NAAIM's survey date when it is not the "
+                        "latest Wednesday (a holiday week's Thursday or Tuesday)")
     p.add_argument("--expect-session", metavar="YYYY-MM-DD|none",
                    help="with --build-tradingview: the session the raw files must reach "
                         "and must not pass. Default: the latest weekday whose 16:30 ET "
@@ -210,15 +222,18 @@ def main(argv=None) -> int:
             or args.reconcile_databento or args.build_tradingview
             or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
             or args.add_aaii_week
-            or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim):
+            or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim
+            or args.add_naaim_week is not None):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
                 "--reconcile-databento, --build-tradingview, --tradingview-csv, "
                 "--build-aaii, --build-aaii-provisional, --add-aaii-week, "
                 "--build-aaii-allocation, "
-                "--fetch-naaim or --build-naaim")
+                "--fetch-naaim, --build-naaim or --add-naaim-week")
     if args.aaii_week and not args.add_aaii_week:
         p.error("--aaii-week dates an --add-aaii-week row; pass both or neither.")
+    if args.naaim_week and args.add_naaim_week is None:
+        p.error("--naaim-week dates an --add-naaim-week row; pass both or neither.")
     if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
         p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
                 "--symbols entry, the internal name the export belongs to.")
@@ -479,7 +494,19 @@ def main(argv=None) -> int:
             results.append({"kind": "series_naaim_fetch", "ok": False, "failed": 1,
                             "errors": [("naaim", str(e))]})
 
-    if args.build_naaim:
+    naaim_refused = False
+    if args.add_naaim_week is not None:
+        from .providers import naaim as nprov
+        try:
+            print(f"naaim: {nprov.add_provisional_week(args.add_naaim_week, week=args.naaim_week)}")
+        except nprov.RawError as e:
+            # Nothing was written, so there is nothing new to build or deliver.
+            print(f"naaim: add week REFUSED -- {e}")
+            naaim_refused = True
+            results.append({"kind": "series_naaim_add_week", "ok": False, "failed": 1,
+                            "errors": [("provisional.csv", str(e))]})
+
+    if (args.build_naaim or args.add_naaim_week is not None) and not naaim_refused:
         from .providers import naaim as nprov
         results.append(nprov.build(args.symbols,
                                    accept_restatement=args.accept_restatement))

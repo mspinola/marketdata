@@ -264,6 +264,20 @@ full-history spreadsheet, copied into `_raw/naaim` as `*.xlsx`, is read by the
 same `--build-naaim` (standard library, no Excel package) and must agree with
 the captures too; it is never committed. Guards: `providers/naaim.py`.
 
+The weeks after the delayed table's end come from `_raw/naaim/provisional.csv` on
+the producer (`week,value,source`, one row a week) and are built into
+`NAAIM_EXPOSURE_PROVISIONAL`, never into `NAAIM_EXPOSURE`. Adding a week is one
+command, run on the producer once StockCharts' `!NAAIM` label shows the new reading:
+
+```
+marketdata-update --add-naaim-week 72.90
+```
+
+It dates the row to the latest Wednesday, NAAIM's usual survey day (pass
+`--naaim-week YYYY-MM-DD` for a holiday week's Thursday or Tuesday), refuses a week
+already in the file at another value and a value identical to the week before (the
+label not yet updated), then builds as `--build-naaim` does.
+
 ```mermaid
 flowchart LR
   subgraph eq["EQUITIES: one stored frame"]
