@@ -307,3 +307,85 @@ def test_the_provisional_series_is_registered_apart_from_the_official_one():
     assert PROV not in [t.internal for t in nprov._targets()]
     assert [t.internal for t in nprov._provisional_targets()] == [PROV]
     assert "NOT official" in s.note
+
+
+# ── adding a week (--add-naaim-week) ─────────────────────────────────────────
+
+def hand_text():
+    return (nprov.raw_root() / nprov.PROVISIONAL_FILE).read_bytes().decode("utf-8")
+
+
+@pytest.mark.parametrize("today, want", [
+    (dt.date(2026, 11, 12), dt.date(2026, 11, 11)),            # Thursday: yesterday
+    (dt.date(2026, 11, 11), dt.date(2026, 11, 11)),            # Wednesday: today
+    (dt.date(2026, 11, 10), dt.date(2026, 11, 4)),             # Tuesday: last week
+])
+def test_the_latest_survey_week_is_the_last_wednesday(today, want):
+    assert nprov.latest_survey_week(today) == want
+
+
+def test_add_creates_the_file_and_defaults_to_the_latest_wednesday(tmp_store):
+    msg = nprov.add_provisional_week(72.9, today=dt.date(2026, 11, 12))
+    assert msg == "added week 2026-11-11 at 72.90 to provisional.csv"
+    assert hand_text() == "week,value,source\n2026-11-11,72.90,stockcharts chart label\n"
+    assert nprov.read_provisional(nprov.raw_root() / nprov.PROVISIONAL_FILE).iloc[-1] == 72.9
+
+
+def test_add_keeps_crlf_and_mends_a_missing_final_newline(tmp_store):
+    root = nprov.raw_root()
+    root.mkdir(parents=True)
+    (root / nprov.PROVISIONAL_FILE).write_bytes(
+        b"week,value,source\r\n2026-11-04,78.62,stockcharts chart label")
+    nprov.add_provisional_week(72.9, week=dt.date(2026, 11, 11))
+    assert hand_text().endswith("label\r\n2026-11-11,72.90,stockcharts chart label\r\n")
+
+
+def test_re_adding_the_same_week_is_a_no_op_and_another_value_is_refused(tmp_store):
+    nprov.add_provisional_week(72.9, week=dt.date(2026, 11, 11))
+    before = hand_text()
+    assert "nothing to add" in nprov.add_provisional_week(72.90, week=dt.date(2026, 11, 11))
+    with pytest.raises(RawError, match="already in provisional.csv at 72.90, not 73.10"):
+        nprov.add_provisional_week(73.1, week=dt.date(2026, 11, 11))
+    assert hand_text() == before
+
+
+def test_last_weeks_value_again_is_refused_as_a_stale_label(tmp_store):
+    nprov.add_provisional_week(78.62, week=dt.date(2026, 11, 4))
+    before = hand_text()
+    with pytest.raises(RawError, match="not updated to week 2026-11-11"):
+        nprov.add_provisional_week(78.62, week=dt.date(2026, 11, 11))
+    assert hand_text() == before
+
+
+@pytest.mark.parametrize("value, week, match", [
+    (250.0, "2026-11-11", "outside -200 to 200"),
+    (70.0, "2026-11-06", "2 day"),                             # misdated: too close
+])
+def test_a_row_the_file_would_refuse_writes_nothing(tmp_store, value, week, match):
+    nprov.add_provisional_week(78.62, week=dt.date(2026, 11, 4))
+    before = hand_text()
+    with pytest.raises(RawError, match=match):
+        nprov.add_provisional_week(value, week=dt.date.fromisoformat(week))
+    assert hand_text() == before
+    assert not (nprov.raw_root() / (nprov.PROVISIONAL_FILE + ".new")).exists()
+
+
+def test_a_named_holiday_week_is_allowed(tmp_store):
+    nprov.add_provisional_week(60.0, week=dt.date(2026, 11, 18))
+    nprov.add_provisional_week(61.0, week=dt.date(2026, 11, 24))   # Thanksgiving Tuesday
+    assert hand_text().splitlines()[-1].startswith("2026-11-24,61.00,")
+
+
+def test_cli_add_naaim_week_adds_and_builds(raw):
+    raw("2026-11-01", FIRST)                                    # official ends 2024-02-07
+    assert update.main(["--add-naaim-week", "90.1", "--naaim-week", "2024-02-14"]) == 0
+    assert list(stored().index.strftime("%Y-%m-%d")) == ["2024-01-31", "2024-02-07"]
+    assert list(provisional()["Close"]) == [90.1]
+    # A refused add exits non-zero and builds nothing.
+    assert update.main(["--add-naaim-week", "90.1", "--naaim-week", "2024-02-21"]) == 1
+    assert list(provisional().index.strftime("%Y-%m-%d")) == ["2024-02-14"]
+
+
+def test_cli_naaim_week_needs_an_add():
+    with pytest.raises(SystemExit):
+        update.main(["--naaim-week", "2026-11-11"])
