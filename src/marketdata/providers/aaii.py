@@ -39,7 +39,8 @@ spreadsheet someone downloaded, while AAII's public results page
 it is published. Those newer weeks come from ``provisional.csv`` in the raw
 directory (``$MARKETDATA_AAII_RAW``, else ``_raw/aaii`` under the store), kept by
 hand: one row a week, ``week, bullish, neutral, bearish, source``, typed exactly
-as the page prints them (``2026-11-04,34.1,17.5,48.4,sent_results``). They are
+as the page prints them (``2026-11-04,34.1,17.5,48.4,sent_results``), most easily
+with ``--add-aaii-week BULLISH NEUTRAL BEARISH`` (`add_provisional_week`). They are
 built into ``AAII_BULLISH_PROVISIONAL`` and its two siblings (registry key
 ``aaii: provisional``; each trims against the leg its name carries without the
 suffix), never into the official legs, for the reasons NAAIM's provisional
@@ -78,6 +79,7 @@ row a week, as NAAIM's provisional weeks are.
 """
 from __future__ import annotations
 
+import datetime as dt
 import os
 from pathlib import Path
 from typing import Iterable, Optional
@@ -242,6 +244,76 @@ def read_provisional(path: Path) -> pd.DataFrame:
                        f"{int(gaps[d])} day(s) after the week before it. A row is "
                        f"misdated; look before building.")
     return out
+
+
+#: The `source` column a row added by `add_provisional_week` carries.
+PUBLIC_SOURCE = "aaii.com/sentimentsurvey/sent_results"
+
+
+def latest_survey_week(today: Optional[dt.date] = None) -> dt.date:
+    """The newest survey week the results page can show on `today`: the latest
+    Wednesday on or before it. AAII publishes a week's results on the Thursday
+    after its Wednesday, so on a Thursday this is yesterday; on a Wednesday it is
+    today, whose results are not out until tomorrow, and the caller says which."""
+    today = today or dt.date.today()
+    return today - dt.timedelta(days=(today.weekday() - PUBLIC_WEEKDAY) % 7)
+
+
+def add_provisional_week(bullish: float, neutral: float, bearish: float, *,
+                         week: Optional[dt.date] = None,
+                         today: Optional[dt.date] = None) -> str:
+    """Append one week's row, as the results page prints it, to ``provisional.csv``
+    (created if absent) and return what was done, in words. The week defaults to
+    `latest_survey_week`. The new file must pass `read_provisional` (a Wednesday,
+    shares that sum to 100, spaced a week from its neighbours) or nothing is
+    written. Re-adding a week with the same numbers changes nothing; with other
+    numbers it is refused (a typo is fixed in the file, by hand, where it shows).
+    Numbers identical to the previous week's are refused too: that is the page
+    before it updated, typed under the new date. Raises `RawError`."""
+    week = week or latest_survey_week(today)
+    if week.weekday() != PUBLIC_WEEKDAY:
+        raise RawError(f"week {week} is a {week:%A}. Give the results page's date, the "
+                       f"survey's Wednesday.")
+    row = (round(float(bullish), 1), round(float(neutral), 1), round(float(bearish), 1))
+    path = raw_root() / PROVISIONAL_FILE
+    # Bytes, not read_text: universal newlines would fold the producer's CRLF away.
+    text = path.read_bytes().decode("utf-8") if path.exists() else ""
+    newline = "\r\n" if "\r\n" in text else "\n"
+    if not text.strip():
+        text = ",".join(PROVISIONAL_COLUMNS) + newline
+    elif not text.endswith(("\n", "\r")):
+        text += newline
+    have = read_provisional(path) if path.exists() and text.strip() else None
+    reported = pd.Timestamp(week) + PUBLIC_TO_REPORTED
+    if have is not None and reported in have.index:
+        old = tuple(round(float(v) * 100, 1) for v in have.loc[reported, list(LEGS)])
+        if old == row:
+            return f"week {week} is already in {path.name} with these numbers; nothing to add"
+        raise RawError(f"week {week} is already in {path.name} as {old}, not {row}. "
+                       f"Fix that row by hand if the page changed.")
+    if have is not None and len(have):
+        prev = have[have.index < reported]
+        if len(prev):
+            last = tuple(round(float(v) * 100, 1) for v in prev.iloc[-1][list(LEGS)])
+            if last == row:
+                raise RawError(
+                    f"{row} are the numbers of week {(prev.index[-1] - PUBLIC_TO_REPORTED).date()}"
+                    f" too. The page has probably not published week {week} yet "
+                    f"(AAII posts it on Thursday); try again later.")
+    line = ",".join([f"{week:%Y-%m-%d}", *(f"{v:.1f}" for v in row), PUBLIC_SOURCE])
+    new = text + line + newline
+    # Checked as a whole before it replaces the file, so a bad row writes nothing.
+    tmp = path.with_name(path.name + ".new")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_bytes(new.encode("utf-8"))
+    try:
+        read_provisional(tmp)
+    except RawError as e:
+        tmp.unlink()
+        raise RawError(str(e).replace(tmp.name, path.name)) from None
+    os.replace(tmp, path)
+    return (f"added week {week} (page date {week:%b} {week.day}, stored on "
+            f"{reported:%Y-%m-%d}): bullish {row[0]}, neutral {row[1]}, bearish {row[2]}")
 
 
 def official_of(sym: Symbol) -> Symbol:
