@@ -280,3 +280,90 @@ def test_cli_builds_the_provisional_legs_alone(tmp_store, feed):
     assert not provisional().empty
     assert update.main(["--build-aaii-provisional", "--symbols",
                         "AAII_BEARISH_PROVISIONAL"]) == 0
+
+
+# ── adding a week from the command line ─────────────────────────────────────
+
+NOV_11 = (30.8, 17.8, 51.4)
+
+
+def hand_text():
+    return (aprov.raw_root() / aprov.PROVISIONAL_FILE).read_bytes().decode("utf-8")
+
+
+@pytest.mark.parametrize("today, want", [
+    (dt.date(2026, 11, 12), dt.date(2026, 11, 11)),     # Thursday: yesterday's survey
+    (dt.date(2026, 11, 11), dt.date(2026, 11, 11)),     # Wednesday: itself
+    (dt.date(2026, 11, 10), dt.date(2026, 11, 4)),      # Tuesday: last week's
+    (dt.date(2026, 11, 15), dt.date(2026, 11, 11))])    # Sunday
+def test_the_latest_survey_week_is_the_last_wednesday(today, want):
+    assert aprov.latest_survey_week(today) == want
+
+
+def test_add_appends_the_row_as_printed_and_builds_it(tmp_store, feed):
+    aprov.build("sentiment.xls")                           # official ends 2026-10-29
+    hand([NOV_4])
+    msg = aprov.add_provisional_week(*NOV_11, today=dt.date(2026, 11, 12))
+    assert "added week 2026-11-11" in msg and "stored on 2026-11-12" in msg
+    assert hand_text().splitlines()[-1] == \
+        "2026-11-11,30.8,17.8,51.4,aaii.com/sentimentsurvey/sent_results"
+    assert aprov.build_provisionals()["ok"]
+    got = (bars.get_bars(PROV[0])["Close"] - bars.get_bars(PROV[2])["Close"]) * 100
+    assert list(got.index) == [pd.Timestamp("2026-11-05"), pd.Timestamp("2026-11-12")]
+    assert got.iloc[-1] == pytest.approx(-20.6)
+
+
+def test_add_keeps_the_producers_crlf_and_creates_a_missing_file(tmp_store):
+    root = aprov.raw_root()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / aprov.PROVISIONAL_FILE
+    path.write_bytes(b"week,bullish,neutral,bearish,source\r\n"
+                     b"2026-11-04,34.1,17.5,48.4,sent_results")      # no final newline
+    aprov.add_provisional_week(*NOV_11, week=dt.date(2026, 11, 11))
+    assert path.read_bytes().endswith(
+        b"sent_results\r\n2026-11-11,30.8,17.8,51.4,aaii.com/sentimentsurvey/sent_results\r\n")
+    path.unlink()
+    aprov.add_provisional_week(*NOV_11, week=dt.date(2026, 11, 11))
+    assert hand_text().splitlines() == [
+        "week,bullish,neutral,bearish,source",
+        "2026-11-11,30.8,17.8,51.4,aaii.com/sentimentsurvey/sent_results"]
+
+
+def test_adding_the_same_week_twice_changes_nothing(tmp_store):
+    aprov.add_provisional_week(*NOV_11, week=dt.date(2026, 11, 11))
+    before = hand_text()
+    msg = aprov.add_provisional_week(*NOV_11, week=dt.date(2026, 11, 11))
+    assert "already in" in msg and hand_text() == before
+
+
+@pytest.mark.parametrize("row, week, match", [
+    ((30.8, 17.8, 50.4), "2026-11-11", "sum to 99"),               # a typo
+    ((0.308, 0.178, 0.514), "2026-11-11", "sum to"),               # decimals, not percent
+    (NOV_11, "2026-11-12", "is a Thursday"),
+    ((31.0, 17.8, 51.2), "2026-11-04", "already in provisional.csv as"),
+    (NOV_4[1:], "2026-11-11", "page has probably not published"),  # last week's numbers
+])
+def test_a_bad_add_is_refused_and_writes_nothing(tmp_store, row, week, match):
+    hand([NOV_4])
+    before = hand_text()
+    with pytest.raises(RawError, match=match):
+        aprov.add_provisional_week(*row, week=dt.date.fromisoformat(week))
+    assert hand_text() == before
+    assert not (aprov.raw_root() / "provisional.csv.new").exists()
+
+
+def test_cli_adds_a_week_and_builds_it(tmp_store, feed):
+    aprov.build("sentiment.xls")
+    hand([NOV_4])
+    assert update.main(["--add-aaii-week", "30.8", "17.8", "51.4",
+                        "--aaii-week", "2026-11-11"]) == 0
+    assert list(provisional().index)[-1] == pd.Timestamp("2026-11-12")
+    # A refused add exits non-zero and builds nothing.
+    assert update.main(["--add-aaii-week", "30.8", "17.8", "51.4",
+                        "--aaii-week", "2026-11-18"]) == 1
+    assert list(provisional().index)[-1] == pd.Timestamp("2026-11-12")
+
+
+def test_cli_aaii_week_needs_an_add():
+    with pytest.raises(SystemExit):
+        update.main(["--aaii-week", "2026-11-11"])

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import sys
 
 from . import config, store
@@ -146,6 +147,21 @@ def main(argv=None) -> int:
                         "only weeks after the official legs' end. The file holds the "
                         "public results page's rows as printed: week (the page's "
                         "Wednesday), bullish, neutral, bearish (percent), source.")
+    p.add_argument("--add-aaii-week", nargs=3, type=float,
+                   metavar=("BULLISH", "NEUTRAL", "BEARISH"),
+                   help="series domain, no network: append this week's row to the "
+                        "hand-kept provisional.csv, the three percentages exactly as "
+                        "AAII's public results page prints them (30.8 17.8 51.4), then "
+                        "rebuild the provisional legs as --build-aaii-provisional does. "
+                        "The week is the latest Wednesday on or before today (on a "
+                        "Thursday, the week AAII just published) unless --aaii-week "
+                        "names it. Refuses a row that does not sum to 100, a week "
+                        "already in the file with other numbers, and numbers identical "
+                        "to the week before (the page not yet updated).")
+    p.add_argument("--aaii-week", metavar="YYYY-MM-DD",
+                   type=lambda v: dt.date.fromisoformat(v),
+                   help="with --add-aaii-week: the survey's Wednesday, as the page "
+                        "prints it, when it is not the latest one")
     p.add_argument("--build-aaii-allocation", metavar="PATH",
                    help="series domain, no network: build the AAII Asset Allocation "
                         "Survey series (AAII_ALLOC_*, monthly) from an asset.xls "
@@ -193,12 +209,16 @@ def main(argv=None) -> int:
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
             or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
+            or args.add_aaii_week
             or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
                 "--reconcile-databento, --build-tradingview, --tradingview-csv, "
-                "--build-aaii, --build-aaii-provisional, --build-aaii-allocation, "
+                "--build-aaii, --build-aaii-provisional, --add-aaii-week, "
+                "--build-aaii-allocation, "
                 "--fetch-naaim or --build-naaim")
+    if args.aaii_week and not args.add_aaii_week:
+        p.error("--aaii-week dates an --add-aaii-week row; pass both or neither.")
     if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
         p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
                 "--symbols entry, the internal name the export belongs to.")
@@ -423,7 +443,20 @@ def main(argv=None) -> int:
         results.append(aprov.build(args.build_aaii, args.symbols,
                                    accept_restatement=args.accept_restatement))
 
-    if args.build_aaii_provisional and not args.build_aaii:
+    add_refused = False
+    if args.add_aaii_week:
+        from .providers import aaii as aprov
+        try:
+            print(f"aaii: {aprov.add_provisional_week(*args.add_aaii_week, week=args.aaii_week)}")
+        except aprov.RawError as e:
+            # Nothing was written, so there is nothing new to build or deliver.
+            print(f"aaii: add week REFUSED -- {e}")
+            add_refused = True
+            results.append({"kind": "series_aaii_add_week", "ok": False, "failed": 1,
+                            "errors": [("provisional.csv", str(e))]})
+
+    if ((args.build_aaii_provisional or args.add_aaii_week) and not args.build_aaii
+            and not add_refused):
         # --build-aaii already rebuilds the provisional legs after the official ones.
         from .providers import aaii as aprov
         results.append(aprov.build_provisionals(args.symbols))

@@ -230,6 +230,18 @@ siblings, never into the official legs. `--build-aaii-provisional` rebuilds them
 drops out once a newer spreadsheet is built. The page refuses an honest automated
 client, so nothing fetches it. Same caveat: build it on the Windows store.
 
+Adding a week is one command, run on the producer once AAII posts the results on
+Thursday: the three percentages as the page prints them.
+
+```
+marketdata-update --add-aaii-week 30.8 17.8 51.4
+```
+
+It dates the row to the latest Wednesday (pass `--aaii-week YYYY-MM-DD` for another),
+refuses a row that does not sum to 100, a week already in the file with other numbers
+and numbers identical to the week before (the page not yet updated), then rebuilds the
+provisional legs.
+
 AAII's monthly Asset Allocation Survey sits beside it: members' average split
 between stocks, bonds and cash, from November 1987 (`AAII_ALLOC_STOCKS`, `_BONDS`,
 `_CASH` as AAII headlines them, plus the fund/direct split `_STOCK_FUNDS`,
