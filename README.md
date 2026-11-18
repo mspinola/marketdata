@@ -211,6 +211,14 @@ raw files are producer-internal and outside every sync. Rationale and the
 guards: `providers/tradingview.py`, `docs/design/breadth-domain-scoping.md` and
 cot-analyzer's `docs/design/tradingview-breadth-scoping.md`.
 
+Each TradingView series has a provisional sibling, `<SYMBOL>_PROVISIONAL`. The build
+holds an evening's newest reading out of the official series until a later pull
+confirms it (the vendor revises it about one evening in four), so the official series
+trails by a session. The sibling carries that held-back reading: at most one bar,
+rewritten by every `--build-tradingview` and emptied once the session settles, with
+the difference printed when it does. Read it only where the reading is marked
+provisional; studies read the official series.
+
 The domain has a second, weekly producer: the AAII Sentiment Survey
 (`AAII_BULLISH`, `AAII_NEUTRAL`, `AAII_BEARISH`, from July 1987, stored as the
 decimals AAII publishes). Its history is a member spreadsheet behind an AAII

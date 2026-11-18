@@ -82,6 +82,13 @@ class Symbol:
     aaii_allocation: Optional[str] = None
     # NAAIM Exposure Index table column ("NAAIM Number"). NEVER defaulted.
     naaim: Optional[str] = None
+    # The internal name of the TradingView series this one is the PROVISIONAL sibling
+    # of: the newest evening's reading, which the vendor may still revise, kept apart
+    # from the official series (providers/tradingview.py, "A capture's newest bar is
+    # PROVISIONAL"). Deliberately NOT a `tradingview:` key: the producer's routine
+    # pulls every entry that carries one, and a sibling is built from the official
+    # symbol's own raw files, never pulled.
+    provisional_of: Optional[str] = None
     price_source: Optional[str] = None
     inception: Optional[str] = None
     note: Optional[str] = None
@@ -204,6 +211,7 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
                 aaii=attrs.get("aaii"),
                 aaii_allocation=attrs.get("aaii_allocation"),
                 naaim=attrs.get("naaim"),
+                provisional_of=attrs.get("provisional_of"),
                 price_source=_validate_source(attrs.get("price_source"), internal),
                 inception=attrs.get("inception"),
                 note=attrs.get("note"),
@@ -216,6 +224,20 @@ def load_registry(yaml_path=None) -> Dict[str, Symbol]:
                     f"serve it (yahoo, norgate, databento, tradingview, cboe, aaii, "
                     f"aaii_allocation and naaim are all null).")
             registry[internal] = sym
+    for sym in registry.values():
+        if sym.provisional_of is None:
+            continue
+        official = registry.get(sym.provisional_of)
+        if official is None or not official.tradingview or official.kind != sym.kind:
+            raise ValueError(
+                f"marketdata registry: symbol '{sym.internal}' is `provisional_of` "
+                f"'{sym.provisional_of}', which must be a TradingView series symbol of "
+                f"the same `kind`.")
+        if sym.tradingview is not None:
+            raise ValueError(
+                f"marketdata registry: symbol '{sym.internal}' carries both "
+                f"`provisional_of` and `tradingview`. A provisional sibling is never "
+                f"pulled; drop the `tradingview` key.")
     return registry
 
 
@@ -229,7 +251,7 @@ def _can_serve(sym: Symbol, source: str) -> bool:
     if source == "cboe":
         return sym.cboe is not None
     if source == "tradingview":
-        return sym.tradingview is not None
+        return sym.tradingview is not None or sym.provisional_of is not None
     if source == "aaii":
         return sym.aaii is not None
     if source == "aaii_allocation":
