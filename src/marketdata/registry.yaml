@@ -200,6 +200,10 @@ Volatility Index:
     price_source: cboe
     inception: "2007-12-04"
     note: "CBOE 3-month S&P 500 implied vol (formerly VXV). Implied series, not tradable. VIX3M/VIX is the term-structure read: below 1 means the front is above the 3-month, the inversion that marks stress. Tape-context set, not trading_riot. Pinned to Cboe's own CSV because Yahoo serves this ticker patchily (measured 2026-09-14: a full pull ended 2026-07-17, a 3-month pull had 24 rows against 64 for ^VIX); Cboe's file starts 2009-09-18."
+  MOVE:
+    yahoo: "^MOVE"
+    inception: "2002-11-12"
+    note: "ICE BofA MOVE index: implied volatility of US Treasuries, from one-month options on the 2, 5, 10 and 30-year. The bond market's VIX. Implied series, not tradable, and no corporate actions, so the tiers are a passthrough. Consumer: cot-analyzer's market internals page (the volatility card), which is in another repo, so a grep of this one comes back clean; do not remove it on that reading. Yahoo's own metadata mislabels this ticker (\"Northern Trust iBoxx 5-Year Tar\", measured 2026-11-18), but the values are the MOVE's: 264.6 on 2008-10-10, 163.7 on 2020-03-09, 36.6 on 2020-09-29. Daily from 2002-11-12, two gaps over five days (2012-11, 2013-03)."
 
 # ── Futures ───────────────────────────────────────────────────────────────
 # Ported from cotdata's registry (ADR-0007 step 2: bars move here, CFTC

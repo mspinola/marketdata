@@ -35,3 +35,13 @@ def test_both_legs_of_each_ratio_are_registered_equities(leg, other):
 def test_the_vol_legs_are_yahoo_index_tickers():
     assert registry.REGISTRY["VIX3M"].yahoo == "^VIX3M"
     assert registry.REGISTRY["VIX"].yahoo == "^VIX"
+
+
+def test_the_bond_volatility_index_is_registered_for_the_internals_page():
+    """MOVE (Treasury implied vol) beside the equity vol indices: an equities-domain
+    Yahoo index ticker, so the 17:30 task fetches it with no new plumbing. Its consumer
+    is cot-analyzer's market internals page."""
+    s = registry.REGISTRY["MOVE"]
+    assert s.yahoo == "^MOVE" and s.domain == "equities"
+    assert registry.resolve_source(s, "yfinance") == "yfinance"
+    assert s.asset_class == registry.REGISTRY["VIX"].asset_class
