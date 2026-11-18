@@ -48,6 +48,14 @@ def test_registry_series_symbols_name_one_series_vendor_and_no_price_vendor():
         if named:
             assert len(named) == 1 and s.tradingview is None, s.internal
             assert resolve_source(s) == named[0], s.internal
+        elif s.provisional_of:
+            # A provisional sibling is built from the official symbol's raw files. It
+            # must NOT carry a `tradingview` key: the producer's routine pulls every
+            # entry that has one.
+            official = REGISTRY[s.provisional_of]
+            assert s.tradingview is None and s.internal == f"{official.internal}_PROVISIONAL"
+            assert official.tradingview and official.kind == s.kind and not s.anchors
+            assert resolve_source(s) == "tradingview", s.internal
         else:
             assert s.tradingview and ":" in s.tradingview, s.internal
             assert resolve_source(s) == "tradingview", s.internal

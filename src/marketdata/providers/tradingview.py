@@ -37,6 +37,16 @@ bar:
     even though the close is hours past. Storing it froze 14 of 15 series from late
     September, because the store is never rewritten and every later capture then
     disagreed with it. The cost is that the store trails the pull by one session.
+  * The provisional bar has a home of its own. A reader who wants today's reading
+    tonight, knowing it may move, gets it from the symbol's PROVISIONAL SIBLING
+    (registry `provisional_of`, `<INTERNAL>_PROVISIONAL`): at most one bar, the newest
+    capture's last, rewritten by every gated build and emptied once that session
+    settles into the official series. It is the one thing here that IS rewritten, and
+    that is the point of keeping it apart: the official series stays append-only and
+    studies read that; a page that shows the sibling says so. When a provisional
+    session settles the build prints provisional minus official, so how far the
+    evening value moves is measured on every symbol every night (it was known only
+    as a count, 54 of 226).
   * Overlap agreement. Every SETTLED bar in a raw file whose session the store or
     an earlier file already holds must equal that Close exactly. Any mismatch
     refuses the symbol. With a ten-bar nightly pull eight settled bars are overlap,
@@ -444,12 +454,71 @@ def build_symbol(sym: Symbol, expect, *, accept: bool = False) -> int:
                 f"session {want.date()}. That session has not closed, so the bar is "
                 f"still moving; nothing written. Pull again after 16:30 ET.")
     check_anchors(out, sym, sym.internal)
+    if expect != NO_GATE:
+        # Before the early return: the retry run adds no official bar and may still
+        # find the evening value changed since the first run.
+        write_provisional(sym, out, captured_through, new)
     if new.empty and not restated:
         return 0
     for line in pending:
         print(line)
     store.write_bars(sym.internal, out.astype(float), domain=DOMAIN, source=NAME)
     return int(len(new))
+
+
+def provisional_sibling(sym: Symbol) -> Optional[Symbol]:
+    """The registry symbol that is `provisional_of` this one, or None."""
+    return next((s for s in all_symbols() if s.provisional_of == sym.internal), None)
+
+
+def write_provisional(sym: Symbol, settled: pd.DataFrame, captured_through,
+                      new: pd.DataFrame) -> None:
+    """Rewrite `sym`'s provisional sibling: the newest capture's last bar when the
+    official series does not hold that session, else nothing.
+
+    Called only on a gated build that has passed every refusal, so the bar is the
+    expected, CLOSED session's evening value: never a session in progress, which the
+    gate refuses, and never from a build with the gate off, which cannot tell.
+    `settled` is the official series as this build leaves it and `new` the bars it
+    adds. For each added session the sibling was holding, the difference is printed
+    before it is dropped: that is the measurement of how far an evening value moves.
+    """
+    sibling = provisional_sibling(sym)
+    if sibling is None:
+        return
+    before = store.read_bars(sibling.internal, DOMAIN, NAME)
+    if not before.empty:
+        held = pd.Series(before["Close"].to_numpy(dtype=float),
+                         index=pd.to_datetime(before.index).tz_localize(None).normalize())
+        for day in held.index.intersection(new.index):
+            was, now = float(held[day]), float(new.loc[day, "Close"])
+            print(f"  {sibling.internal} {day.date()}: settled at {now:g}, provisional "
+                  f"was {was:g} (provisional minus official {was - now:+g})")
+    bar = None
+    if captured_through is not None and captured_through > settled.index.max():
+        for path in reversed(raw_files(sym.internal)):
+            df = parse_raw(path, sym)
+            if df.index[-1] == captured_through:
+                bar = df.iloc[[-1]][list(OHLC)].astype(float)
+                break
+    out = bar if bar is not None else pd.DataFrame(
+        {k: pd.Series(dtype=float) for k in OHLC}, index=pd.DatetimeIndex([]))
+    out.index.name = "Date"
+    if not before.empty:
+        idx = pd.to_datetime(before.index).tz_localize(None).normalize()
+        same = (len(idx) == len(out) and (idx == out.index).all()
+                and np.allclose(before["Close"].to_numpy(dtype=float),
+                                out["Close"].to_numpy(dtype=float), rtol=0, atol=1e-12))
+    else:
+        same = out.empty
+    if same:
+        return
+    store.write_bars(sibling.internal, out, domain=DOMAIN, source=NAME)
+    if out.empty:
+        print(f"  {sibling.internal}: cleared (the session settled)")
+    else:
+        print(f"  {sibling.internal}: {out.index[-1].date()} = {float(out['Close'].iloc[-1]):g} "
+              f"(unconfirmed; replaced when a later pull settles it)")
 
 
 def build(symbols: Optional[Iterable[str]] = None, *, expect_session=None,

@@ -637,3 +637,100 @@ def test_cli_csv_import_needs_exactly_one_symbol_and_then_builds(tmp_store, tmp_
     assert update.main(["--build-tradingview", "--symbols", SYM,
                         "--expect-session", "none"]) == 0
     assert len(stored()) == 9
+
+
+# ── the provisional sibling ─────────────────────────────────────────────────
+#
+# The newest capture's last bar, for a reader who wants tonight's reading tonight
+# knowing it may move. At most one bar, rewritten by every gated build, emptied when
+# the session settles. The official series is untouched by all of it.
+PROV = f"{SYM}_PROVISIONAL"
+
+
+def provisional():
+    return store.read_bars(PROV, "series", "tradingview")
+
+
+def test_every_tradingview_series_has_a_provisional_sibling_the_routine_will_not_pull():
+    official = [s for s in REGISTRY.values() if s.tradingview]
+    siblings = {s.provisional_of: s for s in REGISTRY.values() if s.provisional_of}
+    assert set(siblings) == {s.internal for s in official} and len(official) == 15
+    # The routine pulls every entry carrying a `tradingview:` key, so a sibling has none.
+    assert all(s.tradingview is None for s in siblings.values())
+    assert tprov.provisional_sibling(REGISTRY[SYM]).internal == PROV
+    # And the build's own targets are the official symbols only.
+    assert {s.internal for s in tprov._targets()} == {s.internal for s in official}
+
+
+def test_a_gated_build_stores_the_newest_bar_as_the_provisional_one(raw, capsys):
+    tprov.build([SYM], expect_session=str(LAST.date()))
+    prov = provisional()
+    assert len(prov) == 1 and prov.index[0] == LAST and prov["Close"].iloc[0] == 32.23
+    assert list(prov.columns) == ["Open", "High", "Low", "Close"]
+    assert LAST not in stored().index                    # the official series still trails
+    assert f"{PROV}: 2026-09-16 = 32.23 (unconfirmed" in capsys.readouterr().out
+    from marketdata import get_bars
+    assert get_bars(PROV)["Close"].iloc[-1] == 32.23
+    entry = store.load_manifest()["bars"][f"series/tradingview/{PROV}"]
+    assert entry["last_date"] == "2026-09-16"
+
+
+def test_the_provisional_bar_follows_the_vendor_when_the_evening_value_moves(raw, unanchored):
+    """The same evening, a later pull: the value changed, so the provisional bar does.
+    This is the one series the build rewrites."""
+    tprov.build([SYM], expect_session=str(LAST.date()))
+    d = payload()
+    d["bars"][-1]["c"] = 33.0
+    write(raw, "2026-09-16b.json", d)
+    res = tprov.build([SYM], expect_session=str(LAST.date()))
+    assert res["ok"] and res["wrote"] == 0               # nothing official was added
+    assert provisional()["Close"].iloc[0] == 33.0
+    assert stored().index[-1] == SETTLED
+
+
+def test_a_settled_session_leaves_the_provisional_bar_and_the_difference_is_printed(
+        raw, unanchored, capsys):
+    tprov.build([SYM], expect_session=str(LAST.date()))   # provisional 2026-09-16 = 32.23
+    capsys.readouterr()
+    next_capture(raw, last_close=32.5)                    # it settles at 32.5
+    tprov.build([SYM], expect_session="2026-09-17")
+    out = capsys.readouterr().out
+    assert stored().loc[LAST, "Close"] == 32.5
+    assert (f"{PROV} 2026-09-16: settled at 32.5, provisional was 32.23 "
+            f"(provisional minus official -0.27)") in out
+    prov = provisional()
+    assert len(prov) == 1 and prov.index[0] == pd.Timestamp("2026-09-17")
+    assert prov["Close"].iloc[0] == 40.1
+
+
+def test_no_provisional_bar_without_the_gate_or_on_a_refusal(raw):
+    """Without the gate the newest bar could be a session still in progress, and a
+    refused build writes nothing at all."""
+    tprov.build([SYM], expect_session=tprov.NO_GATE)
+    assert provisional().empty and len(stored()) == 9
+    res = tprov.build([SYM], expect_session="2026-09-17")     # stale: refused
+    assert not res["ok"] and provisional().empty
+
+
+def test_an_unchanged_provisional_bar_is_not_rewritten(raw):
+    tprov.build([SYM], expect_session=str(LAST.date()))
+    path = tprov.config.bars_path(PROV, "series", "tradingview", None)
+    before = path.stat().st_mtime_ns
+    tprov.build([SYM], expect_session=str(LAST.date()))
+    assert path.stat().st_mtime_ns == before
+
+
+def test_the_registry_refuses_a_malformed_provisional_entry(tmp_path):
+    from marketdata import registry
+    good = ("Market Breadth:\n  A:\n    tradingview: 'INDEX:A'\n    kind: percent\n"
+            "  A_PROVISIONAL:\n    provisional_of: A\n    kind: percent\n")
+    path = tmp_path / "r.yaml"
+    path.write_text(good)
+    assert registry.load_registry(path)["A_PROVISIONAL"].provisional_of == "A"
+    for bad, why in ((good.replace("provisional_of: A", "provisional_of: B"), "provisional_of"),
+                     (good.replace("provisional_of: A\n    kind: percent",
+                                   "provisional_of: A\n    kind: count"), "same `kind`"),
+                     (good + "    tradingview: 'INDEX:A'\n", "never pulled")):
+        path.write_text(bad)
+        with pytest.raises(ValueError, match=why):
+            registry.load_registry(path)
