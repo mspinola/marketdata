@@ -126,6 +126,12 @@ def main(argv=None) -> int:
                         "non-zero exit and nothing written -- older is stale (the "
                         "scheduled retry is the second routine), newer is a session "
                         "still open, whose bar is still moving.")
+    p.add_argument("--build-econ-calendar", action="store_true",
+                   help="replace metadata/econ_calendar.parquet with the newest "
+                        "TradingView calendar capture under <tradingview raw root>/"
+                        "_calendar/YYYY-MM-DD.json. A snapshot, rewritten whole each "
+                        "build (forecasts and actuals change). No network. A missing or "
+                        "malformed capture is refused by name and writes nothing.")
     p.add_argument("--tradingview-csv", metavar="PATH",
                    help="series domain backfill: convert one TradingView chart export "
                         "(Export chart data, CSV) for the ONE symbol named by --symbols "
@@ -220,13 +226,15 @@ def main(argv=None) -> int:
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
+            or args.build_econ_calendar
             or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
             or args.add_aaii_week
             or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim
             or args.add_naaim_week is not None):
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
-                "--reconcile-databento, --build-tradingview, --tradingview-csv, "
+                "--reconcile-databento, --build-tradingview, --build-econ-calendar, "
+                "--tradingview-csv, "
                 "--build-aaii, --build-aaii-provisional, --add-aaii-week, "
                 "--build-aaii-allocation, "
                 "--fetch-naaim, --build-naaim or --add-naaim-week")
@@ -452,6 +460,10 @@ def main(argv=None) -> int:
             expect = tprov.NO_GATE
         results.append(tprov.build(args.symbols, expect_session=expect,
                                    accept_restatement=args.accept_restatement))
+
+    if args.build_econ_calendar:
+        from .providers import tradingview_calendar as cprov
+        results.append(cprov.build())
 
     if args.build_aaii:
         from .providers import aaii as aprov

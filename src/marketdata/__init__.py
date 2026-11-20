@@ -59,6 +59,17 @@ from .registry import (
 # being valued is historical: see regimes.py and contract_regimes.yaml.
 from .store import load_manifest, read_metadata, require_schema, schema_version
 
+
+def econ_calendar():
+    """TradingView's US economic calendar as of its newest capture: one row per
+    scheduled release, ``time_utc`` tz-aware, actual/forecast/previous as floats in
+    the vendor's ``scale`` and ``unit``, ``captured`` the capture date. A SNAPSHOT
+    (rewritten each build), and EMPTY when no build has run. See
+    providers/tradingview_calendar.py."""
+    from .providers.tradingview_calendar import read
+    return read()
+
+
 __version__ = "0.3.3"
 __all__ = [
     "get_bars", "available",
@@ -68,7 +79,7 @@ __all__ = [
     "tiers_for", "stored_tiers_for", "ADJUSTMENT_VERSION",
     "symbol", "all_symbols", "by_asset_class", "domain_for", "DOMAINS",
     "REGISTRY", "Symbol",
-    "load_manifest", "read_metadata", "schema_version", "require_schema",
+    "load_manifest", "read_metadata", "econ_calendar", "schema_version", "require_schema",
     "read_contract_regimes", "point_value_asof", "tick_value_asof",
     "declared_symbols", "REGIME_COLUMNS", "RegimeError",
 ]
