@@ -1,8 +1,8 @@
 # The Dr. Mo routine: what Claude does on the producer box each Sunday
 
 The whole instruction set for the Claude Desktop **local routine** that files the week's
-42 Macro Dr. Mo table into marketdata. Copy it into your scheduler folder beside
-`run-drmo.cmd`, fill the markers, and point the routine at it with one line:
+42 Macro Dr. Mo table into marketdata. Copy it into your scheduler folder with
+`run-drmo.cmd` and `drmo-fetch.cmd`, fill the markers, and point the routine at it with one line:
 
 > Follow REPLACE_WITH_SCHEDULER_DIR\drmo-routine.md exactly.
 
@@ -61,17 +61,9 @@ Allow rules, in `REPLACE_WITH_CODE_ROOT\.claude\settings.json`, in the style of
 }
 ```
 
-`drmo-fetch.cmd` is three lines you keep beside `run-drmo.cmd` (it is not a template here
-because it is nothing but your paths). It copies the newest deck to the temp folder and
-prints where the slide is. No angle brackets anywhere in it:
-
-```
-@echo off
-REM Newest Around the Horn deck no older than 6 days, else newest Leadoff deck.
-powershell -NoProfile -Command "$d='REPLACE_WITH_DECKS_SHARE'; $t=Join-Path $env:TEMP 'drmo'; New-Item -ItemType Directory -Force $t | Out-Null; $cut=(Get-Date).AddDays(-6).ToString('yyyy-MM-dd'); $f=Get-ChildItem (Join-Path $d 'ath') -Filter *.pdf | Sort-Object Name | Select-Object -Last 1; if (-not $f -or $f.Name.Substring(0,10) -lt $cut) { $f=Get-ChildItem (Join-Path $d 'lmn') -Filter *.pdf | Sort-Object Name | Select-Object -Last 1 }; if (-not $f) { Write-Output 'drmo: no deck found'; exit 1 }; Copy-Item $f.FullName (Join-Path $t 'deck.pdf') -Force; Write-Output ('drmo: deck ' + $f.Directory.Name + '/' + $f.Name)"
-if errorlevel 1 exit /b 1
-"REPLACE_WITH_VENV_PATH\Scripts\marketdata-update.exe" --find-drmo-slide "%TEMP%\drmo\deck.pdf"
-```
+`drmo-fetch.cmd` is a template beside this file, like `run-drmo.cmd`: copy it into the
+scheduler folder and fill its two markers. It copies the newest deck to a local temp folder
+and prints where the slide is.
 
 Its output is two lines: which deck was taken, and `drmo: slide on page N, report date
 YYYY-MM-DD`. Run it once interactively and copy any rule text that differs from the above
