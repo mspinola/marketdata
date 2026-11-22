@@ -201,6 +201,33 @@ def test_future_dated_report_is_refused(capdir, capsys):
     assert "in the future" in capsys.readouterr().out
 
 
+def test_rsi_may_be_empty_for_slides_that_print_none(capdir):
+    no_rsi = text(W1).replace(",61,", ",,").replace(",48,", ",,")
+    (capdir / f"{W1}.csv").write_text(no_rsi, encoding="utf-8")
+    assert build()["ok"]
+    df = marketdata.drmo(asof=W1).set_index("ticker")
+    assert pd.isna(df.loc["AAA", "rsi"]) and df.loc["CCC", "rsi"] == 22
+    assert str(df["rsi"].dtype) == "Int64"
+
+
+def test_vams_may_be_empty_where_the_slide_prints_na(capdir):
+    (capdir / f"{W1}.csv").write_text(text(W1).replace(",AAA,bullish,", ",AAA,,"),
+                                      encoding="utf-8")
+    assert build()["ok"]
+    assert marketdata.drmo(asof=W1).set_index("ticker").loc["AAA", "vams"] is None
+
+
+def test_unchanged_week_without_rsi_is_kept(capdir):
+    # With no RSI printed, a week whose VAMS and trades all equal the last one's
+    # can be genuine, so it is not refused as a duplicate slide.
+    rows = [r[:4] + (0,) + r[5:] for r in BASE]
+    for w in (W1, W2):
+        (capdir / f"{w}.csv").write_text(text(w, rows=rows).replace(",0,", ",,"),
+                                          encoding="utf-8")
+    assert build()["ok"]
+    assert len(drmo.history()) == 2 * len(BASE)
+
+
 def test_optional_change_column(capdir):
     rows = text(W1, header=HEADER + ",change").splitlines()
     rows = [rows[0], rows[1] + ",bullish"] + [r + "," for r in rows[2:]]

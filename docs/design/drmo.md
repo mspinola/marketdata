@@ -80,8 +80,8 @@ report_date,regime,group,asset,ticker,vams,rsi,proper_trade
 | `group` | the title of the block the asset is printed in |
 | `asset` | the asset's name as printed, without the ticker. Quoted if it holds a comma |
 | `ticker` | the ticker in parentheses, or empty when none is printed |
-| `vams` | `bullish`, `neutral` or `bearish` |
-| `rsi` | whole number, 0 to 100 |
+| `vams` | `bullish`, `neutral` or `bearish`; empty where the cell prints n/a (an asset with no momentum reading yet) |
+| `rsi` | whole number, 0 to 100; empty where the slide prints no RSI (the earliest weeks have no RSI column) or the cell holds no number. Stored as nullable `Int64` |
 | `proper_trade` | `long_max`, `long_half`, `none`, `short_half` or `short_max` |
 | `change` (optional column) | `bullish` or `bearish` where the cell is highlighted as changed, else empty. Leave the column out when the highlight cannot be read reliably |
 
@@ -138,6 +138,57 @@ tickers (found on the first real build, 2026-11-22, which the first version of t
 wrongly refused). `ticker` is unique where present and is the natural join for a consumer's own market-to-ETF map. That
 map (which futures market a given ETF row speaks to) is the consumer's judgment and does not
 live here.
+
+## History: the backfill from 2023-10-21
+
+Built 2026-11-22 from the deck PDFs already on the Mac, one report per week, 157 weeks from
+2023-10-21 to 2026-11-14, joining the first live week (2026-11-21) without a break in block
+names, assets or tickers.
+
+**What is in it, and which slide.** Weeks run Sunday to Saturday. Each week holds the
+latest-dated table slide published in it, from the weekend deck where there is one and from
+a weekday deck otherwise (Around the Horn preferred on a tie), so `report_date` is usually a
+Saturday and sometimes a weekday. That is the same reading the live task takes each Sunday.
+Four weeks have no deck at all and are absent (the reader returns empty for them). Decks
+before 2023-10-21 carry no such table.
+
+**The table changed shape over time**, and the store keeps each week as printed:
+
+| from | what changed |
+|---|---|
+| 2023-10-21 | first table: VAMS and an action column, no RSI |
+| 2023-12-02 | RSI column appears |
+| 2024-01-20 | the action column is relabelled; same five positions |
+| 2024-01-27 to 2024-03-02 | a model-signal band above each block (a header, not an asset; not stored) |
+| 2024-06-28 | some weeks print a hybrid regime, stored as `X WITH Y CHARACTERISTICS` |
+| 2026-07-11 | redesign: two blocks renamed, about 82 rows instead of 69 |
+
+Assets come and go and tickers change across the whole span (about two dozen weeks change
+the list). A consumer following one asset through time should join on `ticker` and expect
+renames; a ticker change is a new key.
+
+**Not recorded:** the cell highlighting (the publisher's change markers, which the
+optional `change` column could hold but the backfill leaves out), and a trailing asterisk
+on a trade, which the slide's footnote defines as a manual override of the rule in hybrid
+regimes. The trade is stored without it.
+
+**How it was checked**, since nothing in a transcription is redundant enough to check
+itself:
+
+- every file passes the build's parse, and every block's row count equals the slide's;
+- a cross-week check over all 158 weeks: every row that is missing for a single week and
+  present on both sides, or present for a single week only, was looked up on its slide.
+  All three such cases are printed that way by the publisher;
+- a proofread by a second reader of 396 rows across 7 weeks spanning every era and layout,
+  against the slide images: no discrepancy;
+- a dry-run build of all 158 weeks into a scratch store, through the same command the box
+  runs, with every guard on.
+
+The build needs `--accept-drmo-universe` for a backfill: the asset-list guard compares each
+week with the stored week before it, so once one genuine change is refused every later week
+is compared with an older week and refused too. The cross-week check above does that guard's
+job for history. The transcriptions themselves are subscriber data and live only in the
+box's raw folder.
 
 ## What a missing or late week looks like
 
