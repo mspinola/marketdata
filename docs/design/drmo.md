@@ -3,8 +3,9 @@
 Status: built 2026-11-21 (`providers/fortytwo_drmo.py`, `marketdata-update --build-drmo`,
 readers `marketdata.drmo()` and `marketdata.drmo_history()`). First consumer: cot-analyzer's
 weekly setup watchlist, which shows the reading beside each set-up market as context.
-Not yet run on the producer box: the routine and wrapper under `docs/examples/windows/`
-(`drmo-routine.md`, `run-drmo.cmd`) are proposals to apply there.
+Live on the producer box since 2026-11-22, when the first week was filed and reached the
+Mac replica. The routine, the fetch script and the wrapper under `docs/examples/windows/`
+are templates of what runs there (the filled-in copies live in the private scheduler repo).
 
 **Licence rule for this repository.** The table is 42 Macro subscriber material. The owner
 approved committing its column names and encodings here (2026-11-21). No reading, no asset
@@ -160,11 +161,30 @@ so that folder is shared to the box read-only as a third share. The alternative,
 on the Mac and handing the CSV to the box, was declined (2026-11-21): it needs a second
 scheduled job and a new Mac-to-box hand-off, where the share needs neither.
 
-A Claude Desktop local routine on NUCBOX_M8 (the same transport as the TradingView series
-and calendar routines) transcribes the slide, writes the CSV into the raw folder, and runs
+A Claude Desktop scheduled task that runs on NUCBOX_M8 itself transcribes the slide, writes the CSV into the raw folder, and runs
 `run-drmo.cmd`, which builds and then calls the two sync scripts. Exact instructions and the
 proposed schedule: `docs/examples/windows/drmo-routine.md`. Delivery does not depend on that
 wrapper's syncs alone: every later producer run mirrors both stores, the unconditional 08:10
 catch-up included, so a Sunday evening build that somehow missed its own syncs is on the Mac by Monday 08:10 at
 the latest. A consumer that wants the week in a Sunday page must build after the routine:
 later than about 18:15 ET, or 20:00 ET to cover the retry.
+
+### What the first live run taught (2026-11-22)
+
+- **The task must run on the box, and how it is created decides that.** Two tasks created
+  by asking Claude in a chat came out as cloud tasks: file access to the attached folder,
+  no shell, no network share. They cannot run either `.cmd` and wrote nothing, correctly.
+  The working task was made by hand in the Code tab's scheduled-task dialog with the
+  repository cleared (a repository makes it a cloud task) and **Require this computer**
+  turned on. Local or cloud is fixed at creation; an existing task cannot be converted.
+- **That task runs without pausing for approval**, so the allow rules in the routine doc do
+  not confine it. What confines it is the build's own refusals and the routine's
+  instruction never to pass an override flag. The allow rules still apply to a session
+  run by hand.
+- **`\\tsclient\...` is not a share.** It is the Mac's disk passed through a Remote
+  Desktop connection and exists only inside that connection, so a hand test over Remote
+  Desktop can pass on a path a scheduled run will never see. The fetch script must name
+  the SMB share.
+- **An asset name is not unique within a report**: the publisher prints one name in two
+  groups over two tickers. The first build refused a correct file on that; the row key is
+  now (group, asset), see "The readers".

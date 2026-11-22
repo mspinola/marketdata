@@ -9,8 +9,9 @@ REM   REPLACE_WITH_SCHEDULER_DIR         = this folder     e.g. C:\Users\you\cot
 REM
 REM WHAT RUNS THIS
 REM ------------------------------------------------------------------------
-REM Not a Task Scheduler task. Stage 1 is a Claude Desktop LOCAL ROUTINE (see
-REM drmo-routine.md beside this file): Claude transcribes the week's slide to
+REM Not a Task Scheduler task. Stage 1 is a Claude Desktop scheduled task that
+REM runs ON THIS COMPUTER (see drmo-routine.md beside this file; a cloud task has
+REM no shell and cannot run this file): Claude transcribes the week's slide to
 REM MARKETDATA_STORE\_raw\fortytwo\drmo\YYYY-MM-DD.csv and its last step is this
 REM file. Stage 2 is the one command below, which reads only those local files.
 REM It can also be run by hand at any time: the build is idempotent, and with
