@@ -44,6 +44,9 @@ Issues = "https://github.com/mspinola/marketdata/issues"
 # Reads AAII's member spreadsheet (sentiment.xls, legacy Excel) for --build-aaii.
 # An extra because only the box that builds the AAII series needs it.
 aaii = ["xlrd>=2"]
+# Finds the Dr. Mo slide's page in a deck PDF for --find-drmo-slide. An extra because
+# only the box that transcribes the slide needs it.
+drmo = ["pypdf>=4"]
 # The free, cross-platform provider. Pinned to a floor because the meaning of
 # history(auto_adjust=...) has changed across yfinance versions — see
 # docs/design.md. Verified against 1.5.2.
@@ -61,7 +64,7 @@ norgate = ["norgatedata"]
 # Stage 1 (`--ingest-databento`) is billed per query. Stage 2 (`--build-databento`)
 # needs neither the key nor the network.
 databento = ["databento>=0.30"]
-dev = ["pytest>=7", "ruff==0.15.22"]
+dev = ["pytest>=7", "ruff==0.15.22", "pypdf>=4"]
 
 [project.scripts]
 marketdata-update = "marketdata.update:main"

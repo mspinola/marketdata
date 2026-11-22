@@ -29,8 +29,8 @@ REM retry loop here.
 REM
 REM The raw CSVs never ride along: both sync scripts exclude _raw by name.
 setlocal
-set "MARKETDATA_STORE=REPLACE_WITH_MARKETDATA_STORE_PATH"
-set "MDEXE=REPLACE_WITH_VENV_PATH\Scripts\marketdata-update.exe"
+set "MARKETDATA_STORE=C:\Users\matt\code\cotdata\scheduler"
+set "MDEXE=C:\Users\matt\code\marketdata\Scripts\marketdata-update.exe"
 
 "%MDEXE%" --build-drmo
 set "RC=%ERRORLEVEL%"
@@ -38,10 +38,10 @@ if not "%RC%"=="0" if not "%RC%"=="2" exit /b %RC%
 
 REM Mac sync first, VPS push second, the push NOT gated on the sync (see
 REM run-series.cmd for why). Each ERRORLEVEL is captured on its own line.
-call "REPLACE_WITH_SCHEDULER_DIR\sync-store.cmd"
+call "C:\Users\matt\code\cotdata\scheduler\sync-store.cmd"
 set "SYNC_RC=%ERRORLEVEL%"
 
-call "REPLACE_WITH_SCHEDULER_DIR\push-to-server.cmd"
+call "C:\Users\matt\code\cotdata\scheduler\push-to-server.cmd"
 set "PUSH_RC=%ERRORLEVEL%"
 
 if "%SYNC_RC%"=="" set "SYNC_RC=1"

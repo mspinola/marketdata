@@ -8,12 +8,30 @@ The whole instruction set for the Claude Desktop **local routine** that files th
 
 Markers: `REPLACE_WITH_CODE_ROOT` (e.g. `C:\Users\you\code`),
 `REPLACE_WITH_MARKETDATA_STORE_PATH`, `REPLACE_WITH_SCHEDULER_DIR`, and
-`REPLACE_WITH_WHERE_THE_DECKS_ARE` (one sentence: how this session reaches the 42 Macro
-slide decks, for example the folder the PDFs are saved to, or the connector and search to
-use).
+`REPLACE_WITH_DECKS_SHARE` (the folder holding the 42 Macro deck PDFs as this box sees it,
+e.g. `\\YOUR-MAC\decks`; see "Where the decks are" below), and `REPLACE_WITH_VENV_PATH`.
 
 Design and the file format's reasons: marketdata `docs/design/drmo.md`. The transcription is
 subscriber data. It stays under `_raw` on this box and is never committed anywhere.
+
+## Where the decks are
+
+The decks are saved on another machine (the Mac), in one folder with a subfolder per deck
+kind: `ath\` for Around the Horn and `lmn\` for the Leadoff Morning Note, each file named
+by its date, `YYYY-MM-DD.pdf` (older files `YYYY-MM-DD_Slides.pdf`). That folder is shared
+to this box **read-only** over SMB, as its own share, apart from the two store shares the
+mirror writes to. One-time setup, by a person:
+
+1. On the Mac: System Settings, General, Sharing, File Sharing, add the decks folder, and
+   give the account this box connects with Read Only.
+2. On this box: open `REPLACE_WITH_DECKS_SHARE` in Explorer once and save the credentials,
+   so a routine can read it without a prompt.
+3. On this box: `uv pip install --python REPLACE_WITH_VENV_PATH\Scripts\python.exe pypdf`
+   (step 1's page finder needs it).
+
+The Mac must be awake when the routine runs. The routine copies the one PDF it needs to a
+local temp folder and reads the copy, so nothing is held open on the share. The decks are
+subscriber material: the copy stays in the temp folder and nothing from it is committed.
 
 ## Routine settings
 
@@ -32,6 +50,9 @@ Allow rules, in `REPLACE_WITH_CODE_ROOT\.claude\settings.json`, in the style of
 {
   "permissions": {
     "allow": [
+      "Read(//YOUR-MAC/decks/**)",
+      "Read(/c/Users/you/AppData/Local/Temp/drmo/**)",
+      "Bash(cmd //c \"C:/Users/you/code/cotdata/scheduler/drmo-fetch.cmd\")",
       "Edit(marketdata_store/_raw/fortytwo/drmo/**)",
       "Edit(/c/Users/you/code/marketdata_store/_raw/fortytwo/drmo/**)",
       "Bash(cmd //c \"C:/Users/you/code/cotdata/scheduler/run-drmo.cmd\")"
@@ -40,25 +61,41 @@ Allow rules, in `REPLACE_WITH_CODE_ROOT\.claude\settings.json`, in the style of
 }
 ```
 
-Add whatever read rule step 1 needs (a `Read(...)` of the folder the slide is saved to, or
-the connector tool), copied from the prompt text of one interactive run.
+`drmo-fetch.cmd` is three lines you keep beside `run-drmo.cmd` (it is not a template here
+because it is nothing but your paths). It copies the newest deck to the temp folder and
+prints where the slide is. No angle brackets anywhere in it:
+
+```
+@echo off
+REM Newest Around the Horn deck no older than 6 days, else newest Leadoff deck.
+powershell -NoProfile -Command "$d='REPLACE_WITH_DECKS_SHARE'; $t=Join-Path $env:TEMP 'drmo'; New-Item -ItemType Directory -Force $t | Out-Null; $cut=(Get-Date).AddDays(-6).ToString('yyyy-MM-dd'); $f=Get-ChildItem (Join-Path $d 'ath') -Filter *.pdf | Sort-Object Name | Select-Object -Last 1; if (-not $f -or $f.Name.Substring(0,10) -lt $cut) { $f=Get-ChildItem (Join-Path $d 'lmn') -Filter *.pdf | Sort-Object Name | Select-Object -Last 1 }; if (-not $f) { Write-Output 'drmo: no deck found'; exit 1 }; Copy-Item $f.FullName (Join-Path $t 'deck.pdf') -Force; Write-Output ('drmo: deck ' + $f.Directory.Name + '/' + $f.Name)"
+if errorlevel 1 exit /b 1
+"REPLACE_WITH_VENV_PATH\Scripts\marketdata-update.exe" --find-drmo-slide "%TEMP%\drmo\deck.pdf"
+```
+
+Its output is two lines: which deck was taken, and `drmo: slide on page N, report date
+YYYY-MM-DD`. Run it once interactively and copy any rule text that differs from the above
+out of the prompt.
 
 ## Steps
 
 Do these in order, and nothing else.
 
-1. **Get this week's Dr. Mo slide.** REPLACE_WITH_WHERE_THE_DECKS_ARE. It is the slide
-   whose title names the Discretionary Risk Management Overlay and ends with a date.
+1. **Find this week's Dr. Mo slide.**
    - First look at the raw folder (step 5's path). If it already holds a file dated within
      the last six days, this week is filed: write nothing and go to step 6.
-   - Take the slide from this weekend's **Around the Horn** deck.
-   - Only if that deck is not available, take it from the **most recent Leadoff Morning
-     Note** deck instead. Its slide carries its own, earlier date: use the date printed on
-     the slide you transcribe, never today's and never the other deck's.
-   - If the newest slide you can find in either deck is dated more than six days ago, this
-     week's is not out: say so and stop. Write nothing.
-2. **Read the report date and the market regime** from the slide's title and the line under
-   it. The date becomes `YYYY-MM-DD`.
+   - Run, typed exactly: `cmd //c "C:/Users/you/code/cotdata/scheduler/drmo-fetch.cmd"`.
+     It takes this weekend's **Around the Horn** deck, or the most recent **Leadoff Morning
+     Note** deck when no Around the Horn deck from the last six days is there, and prints
+     the page of the slide and the report date in its title.
+   - If it prints REFUSED or `no deck found`, or the report date is more than six days
+     ago, this week's is not out: repeat the line and stop. Write nothing.
+   - Open **only that page** of `%TEMP%\drmo\deck.pdf`. It is the slide with five blocks
+     side by side, each with VAMS, RSI and PROPER TRADE columns. Do not read the rest of
+     the deck.
+2. **Take the report date from step 1's output**, and check it against the date in the
+   slide's title: if they differ, stop and say so. Read the **market regime** from the line
+   under the title.
 3. **Transcribe every asset row of every block** into CSV with exactly this header:
 
    ```

@@ -141,6 +141,11 @@ def main(argv=None) -> int:
                         "Append-only: a stored week is never rewritten, and a file that "
                         "disagrees with its stored week is refused by name. Never "
                         "commit a transcription: it is 42 Macro subscriber data.")
+    p.add_argument("--find-drmo-slide", metavar="PDF",
+                   help="no network: print the page number and the report date of the "
+                        "Dr. Mo table slide in a 42 Macro deck PDF, found from the "
+                        "slide title's text. The table itself is an image; this only "
+                        "tells a reader which page to open. Needs pypdf. Exits after.")
     p.add_argument("--replace-drmo-week", nargs="+", metavar="YYYY-MM-DD", default=None,
                    type=lambda v: dt.date.fromisoformat(v),
                    help="with --build-drmo: let the filed transcription of these weeks "
@@ -245,7 +250,7 @@ def main(argv=None) -> int:
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
-            or args.build_econ_calendar or args.build_drmo
+            or args.build_econ_calendar or args.build_drmo or args.find_drmo_slide
             or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
             or args.add_aaii_week
             or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim
@@ -253,7 +258,7 @@ def main(argv=None) -> int:
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
                 "--reconcile-databento, --build-tradingview, --build-econ-calendar, "
-                "--build-drmo, "
+                "--build-drmo, --find-drmo-slide, "
                 "--tradingview-csv, "
                 "--build-aaii, --build-aaii-provisional, --add-aaii-week, "
                 "--build-aaii-allocation, "
@@ -337,6 +342,16 @@ def main(argv=None) -> int:
         print(f"note: --final-cutoff {args.final_cutoff} is deprecated and ignored. "
               f"The finals gate is data-driven (a newer settled bar than the store "
               f"holds), so it needs no cutoff and no trading calendar.")
+
+    if args.find_drmo_slide:
+        from .providers import fortytwo_drmo as dmprov
+        try:
+            page, date = dmprov.find_slide(args.find_drmo_slide)
+        except dmprov.RawError as e:
+            print(f"drmo: REFUSED -- {e}")
+            return 1
+        print(f"drmo: slide on page {page}, report date {date.isoformat()}")
+        return 0
 
     # Reconcile is read-only on the API and repairs the resume ledger, so it runs
     # before anything that would consult it and exits on its own.
