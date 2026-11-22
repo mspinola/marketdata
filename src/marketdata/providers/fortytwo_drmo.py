@@ -198,9 +198,12 @@ def parse_capture(path, *, expect_date: Optional[dt.date] = None,
             if ticker in tickers:
                 raise RawError(f"{where}: ticker {ticker} appears twice")
             tickers.add(ticker)
-        vams = r["vams"].lower()
-        if vams not in VAMS:
-            raise RawError(f"{where}: vams is {r['vams']!r}, expected one of {VAMS}")
+        # Empty is the slide printing "n/a" in the VAMS cell (seen on a newly listed
+        # asset with no momentum reading yet), never an illegible mark.
+        vams = r["vams"].lower() or None
+        if vams is not None and vams not in VAMS:
+            raise RawError(f"{where}: vams is {r['vams']!r}, expected one of {VAMS}, or "
+                           f"empty where the slide prints n/a")
         if r["rsi"] and (not re.fullmatch(r"\d{1,3}", r["rsi"]) or int(r["rsi"]) > 100):
             raise RawError(f"{where}: rsi is {r['rsi']!r}, expected a whole number "
                            f"from 0 to 100, or empty when the slide prints no RSI")

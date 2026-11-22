@@ -210,6 +210,13 @@ def test_rsi_may_be_empty_for_slides_that_print_none(capdir):
     assert str(df["rsi"].dtype) == "Int64"
 
 
+def test_vams_may_be_empty_where_the_slide_prints_na(capdir):
+    (capdir / f"{W1}.csv").write_text(text(W1).replace(",AAA,bullish,", ",AAA,,"),
+                                      encoding="utf-8")
+    assert build()["ok"]
+    assert marketdata.drmo(asof=W1).set_index("ticker").loc["AAA", "vams"] is None
+
+
 def test_unchanged_week_without_rsi_is_kept(capdir):
     # With no RSI printed, a week whose VAMS and trades all equal the last one's
     # can be genuine, so it is not refused as a duplicate slide.
