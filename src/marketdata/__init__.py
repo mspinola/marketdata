@@ -70,6 +70,24 @@ def econ_calendar():
     return read()
 
 
+def drmo(asof=None, *, max_age_days=6):
+    """42 Macro's weekly Dr. Mo table as published in the report current on ``asof``
+    (default today): one row per asset with ``vams`` (bullish / neutral / bearish),
+    ``rsi``, ``proper_trade`` and its signed ``position`` (-1 to 1), under one
+    ``regime`` and ``report_date``. EMPTY when no report on or before ``asof`` is at
+    most ``max_age_days`` old (a late week reads as absent, never as last week's),
+    and when no build has run. Pass a past ``asof`` to see that week as it was. See
+    providers/fortytwo_drmo.py."""
+    from .providers.fortytwo_drmo import read
+    return read(asof, max_age_days=max_age_days)
+
+
+def drmo_history():
+    """Every stored Dr. Mo week, oldest first; EMPTY when no build has run."""
+    from .providers.fortytwo_drmo import history
+    return history()
+
+
 __version__ = "0.3.3"
 __all__ = [
     "get_bars", "available",
@@ -79,7 +97,8 @@ __all__ = [
     "tiers_for", "stored_tiers_for", "ADJUSTMENT_VERSION",
     "symbol", "all_symbols", "by_asset_class", "domain_for", "DOMAINS",
     "REGISTRY", "Symbol",
-    "load_manifest", "read_metadata", "econ_calendar", "schema_version", "require_schema",
+    "load_manifest", "read_metadata", "econ_calendar", "drmo", "drmo_history",
+    "schema_version", "require_schema",
     "read_contract_regimes", "point_value_asof", "tick_value_asof",
     "declared_symbols", "REGIME_COLUMNS", "RegimeError",
 ]
