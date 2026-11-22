@@ -254,6 +254,56 @@ def file_capture(path, *, replace: Iterable[dt.date] = (),
     return dest
 
 
+#: What singles the table slide out of a deck, from its text layer alone: the overlay's
+#: name plus a full date in the title. Measured on five decks, 2023 to 2026: several
+#: other slides carry the name (an index page, per-asset chart pages) and none of them
+#: a dated title. The table itself is an image, so this finds the page and its date and
+#: nothing more; reading the table still takes eyes.
+SLIDE_NAME = "Discretionary Risk Management Overlay"
+_TITLE_DATE_RE = re.compile(
+    r"(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day,\s+"
+    r"(January|February|March|April|May|June|July|August|September|October|November|"
+    r"December)\s+(\d{1,2}),\s+(20\d\d)")
+_MONTHS = {m: i for i, m in enumerate(
+    ("January", "February", "March", "April", "May", "June", "July", "August",
+     "September", "October", "November", "December"), start=1)}
+
+
+def find_slide(pdf) -> tuple:
+    """``(page, report_date)`` of the Dr. Mo table slide in a deck PDF: the 1-based
+    page for a PDF reader and the date printed in the slide's title. A deck that
+    prints the slide twice (same date) returns the first. Raises `RawError` when no
+    page qualifies or two qualify with different dates. Needs ``pypdf`` (the ``drmo``
+    extra); reads the local file only."""
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise RawError("finding the slide needs pypdf: install the drmo extra "
+                       "(uv pip install pypdf)") from None
+    try:
+        pages = PdfReader(str(pdf)).pages
+        texts = [" ".join((p.extract_text() or "").split()) for p in pages]
+    except Exception as e:  # pypdf raises its own family, plus OSError
+        raise RawError(f"{pdf}: not a readable PDF ({e})") from None
+    hits = []
+    for n, t in enumerate(texts, start=1):
+        m = _TITLE_DATE_RE.search(t) if SLIDE_NAME in t else None
+        if m:
+            try:
+                hits.append((n, dt.date(int(m.group(3)), _MONTHS[m.group(1)],
+                                        int(m.group(2)))))
+            except ValueError:
+                continue
+    if not hits:
+        raise RawError(f"{pdf}: no page carries the overlay's name with a dated title "
+                       f"({len(texts)} pages read). Not a deck with the Dr. Mo slide, or "
+                       f"the slide's title changed.")
+    if len({d for _, d in hits}) > 1:
+        raise RawError(f"{pdf}: candidate pages disagree on the date: "
+                       + ", ".join(f"page {n} {d}" for n, d in hits))
+    return hits[0]
+
+
 def _same(a: pd.DataFrame, b: pd.DataFrame) -> list:
     """Assets on which two frames of one week disagree, in any stored column."""
     cols = [c for c in COLUMNS if c != "report_date"]

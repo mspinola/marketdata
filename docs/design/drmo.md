@@ -32,6 +32,15 @@ weekday **Leadoff Morning Note** deck carries the same slide under its own date 
 fallback when the weekend deck is not available. So `report_date` is the date printed on
 the slide transcribed: usually a Saturday, a weekday when the fallback was used.
 
+The decks are saved as PDFs on the Mac, one folder per deck kind, each file named by its
+date. In the PDF the slide's **title is text and its table is an image** (checked on decks
+from 2023 to 2026 with pypdf: the title extracts, no cell does). So no parser can read the
+table, and a session with eyes has to. What the text layer does give is the page:
+`marketdata-update --find-drmo-slide PDF` prints the one page whose text carries the
+overlay's name and a dated title, and that date. Other pages carry the name (an index page,
+per-asset chart pages) but none a dated title. A deck with no such page is refused, which is
+also what an old deck that predates the slide looks like.
+
 There is no API and no file export. It reaches a machine only through a Claude session that
 can see the slide, which until now was a claude.ai Project of the owner's.
 
@@ -143,6 +152,11 @@ Never an exception for a missing table, and never last week's rows in this week'
 days is "a Saturday report covers through the following Friday".
 
 ## On the box
+
+The box cannot see the Mac's deck folder by default (the Mac shares only the two stores),
+so that folder is shared to the box read-only as a third share. The alternative, transcribing
+on the Mac and handing the CSV to the box, was declined (2026-11-21): it needs a second
+scheduled job and a new Mac-to-box hand-off, where the share needs neither.
 
 A Claude Desktop local routine on NUCBOX_M8 (the same transport as the TradingView series
 and calendar routines) transcribes the slide, writes the CSV into the raw folder, and runs

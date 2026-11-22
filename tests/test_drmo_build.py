@@ -228,3 +228,51 @@ def test_path_files_a_download_under_its_own_report_date(tmp_store, tmp_path, ca
     bad = tmp_path / "x.csv"
     bad.write_text("nothing\n")
     assert not build(bad)["ok"]
+
+
+def _pdf(path, page_texts):
+    """A minimal text-only PDF, one Helvetica line per page. Invented titles."""
+    objs = ["<< /Type /Catalog /Pages 2 0 R >>", None,
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    kids = []
+    for t in page_texts:
+        stream = f"BT /F1 12 Tf 40 700 Td ({t}) Tj ET"
+        objs.append(f"<< /Length {len(stream)} >>\nstream\n{stream}\nendstream")
+        objs.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                    f"/Contents {len(objs)} 0 R /Resources << /Font << /F1 3 0 R >> >> >>")
+        kids.append(f"{len(objs)} 0 R")
+    objs[1] = f"<< /Type /Pages /Kids [{' '.join(kids)}] /Count {len(kids)} >>"
+    out, offs = "%PDF-1.4\n", []
+    for i, o in enumerate(objs, start=1):
+        offs.append(len(out))
+        out += f"{i} 0 obj\n{o}\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objs) + 1}\n0000000000 65535 f \n"
+    out += "".join(f"{o:010d} 00000 n \n" for o in offs)
+    out += f"trailer\n<< /Size {len(objs) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n"
+    path.write_bytes(out.encode("latin-1"))
+    return path
+
+
+def test_find_slide_by_name_and_dated_title(tmp_path, capsys):
+    pytest.importorskip("pypdf")
+    name = drmo.SLIDE_NAME
+    deck = _pdf(tmp_path / "deck.pdf", [
+        "An index page",
+        f"A chart page about the {name}",          # the name, no dated title
+        "Some other slide: Saturday, March 6, 2021",  # a date, not the name
+        f"Use the {name}: Saturday, March 6, 2021",
+        f"Use the {name}: Saturday, March 6, 2021",  # printed twice, same date
+    ])
+    assert drmo.find_slide(deck) == (4, W1)
+    assert update.main(["--find-drmo-slide", str(deck)]) == 0
+    assert f"page 4, report date {W1}" in capsys.readouterr().out
+    none = _pdf(tmp_path / "none.pdf", ["An index page", f"About the {name}"])
+    with pytest.raises(drmo.RawError, match="no page"):
+        drmo.find_slide(none)
+    two = _pdf(tmp_path / "two.pdf", [f"{name}: Saturday, March 6, 2021",
+                                      f"{name}: Friday, March 5, 2021"])
+    with pytest.raises(drmo.RawError, match="disagree"):
+        drmo.find_slide(two)
+    (tmp_path / "bad.pdf").write_text("not a pdf")
+    assert update.main(["--find-drmo-slide", str(tmp_path / "bad.pdf")]) == 1
