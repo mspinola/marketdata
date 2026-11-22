@@ -102,7 +102,7 @@ No network. Every filed week the table lacks is added; every week it holds is re
 against its file. Refusals, each naming the file and writing nothing for that week:
 
 1. Not the agreed CSV: header, one date matching the name, one regime, the vocabularies, RSI
-   range, duplicate asset or ticker. A model's prose reply saved as the file fails here.
+   range, an asset twice in one group, a ticker twice. A model's prose reply saved as the file fails here.
 2. A report dated in the future.
 3. **A stored week is never rewritten.** A file that differs from its stored week is refused
    with the assets that differ, until `--replace-drmo-week YYYY-MM-DD` names that week. The
@@ -132,8 +132,10 @@ marketdata.drmo_history()                    # every week
 
 `drmo()` returns the newest report dated on or before `asof` (default today). Because weeks
 are append-only, `drmo(asof="2026-11-25")` returns what that week's report said, whatever has
-been filed since. Keys: `asset` is unique within a report and always present; `ticker` is
-unique where present and is the natural join for a consumer's own market-to-ETF map. That
+been filed since. Keys: a row's identity within a report is (`group`, `asset`). The asset name alone is
+**not** unique: the publisher prints the same name in two groups over two different
+tickers (found on the first real build, 2026-11-22, which the first version of the guard
+wrongly refused). `ticker` is unique where present and is the natural join for a consumer's own market-to-ETF map. That
 map (which futures market a given ETF row speaks to) is the consumer's judgment and does not
 live here.
 

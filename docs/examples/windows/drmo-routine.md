@@ -131,7 +131,7 @@ Do these in order, and nothing else.
 
 | message | meaning | what the person does |
 |---|---|---|
-| header / vams / rsi / proper_trade / appears twice | the file is malformed | fix the CSV by hand against the slide, rerun `run-drmo.cmd` |
+| header / vams / rsi / proper_trade / appears twice | the file is malformed (the same asset name in two different groups is fine; twice in one group, or one ticker twice, is not) | fix the CSV by hand against the slide, rerun `run-drmo.cmd` |
 | the asset list differs from week ... | a row was dropped or renamed, or the publisher changed the list | fix the CSV, or if the slide really changed: `marketdata-update --build-drmo --accept-drmo-universe`, then `run-drmo.cmd` |
 | differs from the stored week ... | this file disagrees with what is already stored for that date | compare both with the slide; if the file is right: `marketdata-update --build-drmo --replace-drmo-week YYYY-MM-DD`, then `run-drmo.cmd` |
 | every reading equals week ... | last week's slide was transcribed again | delete that CSV, wait for the new slide |

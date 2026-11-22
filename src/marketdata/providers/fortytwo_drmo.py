@@ -27,8 +27,8 @@ lets a consumer show a past week as it was (``read(asof=...)``).
 WHAT IS REFUSED, each by file name, each writing nothing for that week:
 
 - a file that is not the agreed CSV (header, one report date equal to the file name,
-  one regime, the three vocabularies, an integer RSI in 0 to 100, unique assets and
-  tickers);
+  one regime, the three vocabularies, an integer RSI in 0 to 100, an asset at most
+  once per group, a ticker at most once);
 - a report dated in the future;
 - an asset list that differs from the previous stored week's, unless
   ``accept_universe``: a dropped row is the likeliest transcription error and looks
@@ -184,9 +184,10 @@ def parse_capture(path, *, expect_date: Optional[dt.date] = None,
         regimes.add(r["regime"].upper())
         if not r["group"]:
             raise RawError(f"{where}: no group")
-        if asset.lower() in assets:
-            raise RawError(f"{where}: asset appears twice")
-        assets.add(asset.lower())
+        key = (r["group"].lower(), asset.lower())
+        if key in assets:
+            raise RawError(f"{where}: asset appears twice in group {r['group']!r}")
+        assets.add(key)
         ticker = r["ticker"].upper() or None
         if ticker is not None:
             if not _TICKER_RE.match(ticker):
@@ -304,11 +305,19 @@ def find_slide(pdf) -> tuple:
     return hits[0]
 
 
+def _keyed(df: pd.DataFrame) -> pd.DataFrame:
+    """Indexed by the row's identity within a report, ``group / asset``. The asset
+    name alone is not one: the publisher prints the same name in two groups, over
+    two different tickers."""
+    return df.set_index(df["group"] + " / " + df["asset"])
+
+
 def _same(a: pd.DataFrame, b: pd.DataFrame) -> list:
-    """Assets on which two frames of one week disagree, in any stored column."""
-    cols = [c for c in COLUMNS if c != "report_date"]
-    a = a.set_index("asset")[[c for c in cols if c != "asset"]]
-    b = b.set_index("asset")[[c for c in cols if c != "asset"]]
+    """Rows (``group / asset``) on which two frames of one week disagree, in any
+    stored column."""
+    cols = [c for c in COLUMNS if c not in ("report_date", "group", "asset")]
+    a = _keyed(a)[cols]
+    b = _keyed(b)[cols]
     out = sorted(set(a.index) ^ set(b.index))
     for asset in sorted(set(a.index) & set(b.index)):
         ra, rb = a.loc[asset], b.loc[asset]
@@ -321,7 +330,7 @@ def _check_against_previous(df: pd.DataFrame, prev: pd.DataFrame, src: Path,
                             accept_universe: bool) -> None:
     week = f"{df['report_date'].iloc[0]:%Y-%m-%d}"
     pweek = f"{prev['report_date'].iloc[0]:%Y-%m-%d}"
-    new, old = set(df["asset"]), set(prev["asset"])
+    new, old = set(_keyed(df).index), set(_keyed(prev).index)
     if new != old and not accept_universe:
         raise RawError(
             f"{src}: the asset list differs from week {pweek}'s "
@@ -329,8 +338,8 @@ def _check_against_previous(df: pd.DataFrame, prev: pd.DataFrame, src: Path,
             f"A dropped or renamed row is the likeliest transcription error. Check the "
             f"slide; if the publisher did change the list, pass --accept-drmo-universe.")
     if new == old:
-        a = df.set_index("asset")[_READINGS].sort_index()
-        b = prev.set_index("asset")[_READINGS].sort_index()
+        a = _keyed(df)[_READINGS].sort_index()
+        b = _keyed(prev)[_READINGS].sort_index()
         if a.equals(b):
             raise RawError(f"{src}: every reading equals week {pweek}'s. That is last "
                            f"week's slide filed as {week}, not a new report.")
