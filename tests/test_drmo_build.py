@@ -131,7 +131,7 @@ def test_a_stored_week_is_never_rewritten_without_being_named(capdir, capsys):
     r = build()
     out = capsys.readouterr().out
     assert not r["ok"] and r["partial"]
-    assert "never rewritten" in out and "Alpha Fund" in out and f"{W1}.csv" in out
+    assert "never rewritten" in out and "Group One / Alpha Fund" in out and f"{W1}.csv" in out
     assert drmo.table_path().read_bytes() == before
     assert update.main(["--build-drmo", "--replace-drmo-week", str(W1)]) == 0
     assert marketdata.drmo(asof=W1).set_index("ticker").loc["AAA", "rsi"] == 62
@@ -276,3 +276,26 @@ def test_find_slide_by_name_and_dated_title(tmp_path, capsys):
         drmo.find_slide(two)
     (tmp_path / "bad.pdf").write_text("not a pdf")
     assert update.main(["--find-drmo-slide", str(tmp_path / "bad.pdf")]) == 1
+
+
+def test_same_asset_name_in_two_groups_is_two_rows(capdir, capsys):
+    # The publisher prints one name in two groups over two tickers.
+    rows = BASE + [("Group One", "Delta Fund", "EEE", "bullish", 70, "long_half")]
+    place(capdir, W1, rows=rows)
+    assert build()["ok"]
+    df = marketdata.drmo(asof=W1)
+    twins = df[df["asset"] == "Delta Fund"].set_index("ticker")
+    assert (twins.loc["DDD", "group"], twins.loc["EEE", "group"]) == ("Group Two", "Group One")
+    # A later week is compared row for row, each twin with itself.
+    place(capdir, W2, rows=rows, shift=2)
+    assert build()["ok"]
+    # Editing one twin of a stored week names that twin, group included.
+    edited = rows[:-1] + [rows[-1][:4] + (71,) + rows[-1][5:]]
+    place(capdir, W1, rows=edited)
+    assert not build()["ok"]
+    out = capsys.readouterr().out
+    assert "Group One / Delta Fund" in out and "Group Two / Delta Fund" not in out
+    # Twice in ONE group is still a duplicate.
+    place(capdir, W3, rows=rows + [("Group One", "Delta Fund", "FFF", "neutral", 50, "none")])
+    assert not build()["ok"]
+    assert "appears twice in group" in capsys.readouterr().out
