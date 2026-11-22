@@ -1,6 +1,6 @@
 # The Dr. Mo routine: what Claude does on the producer box each Sunday
 
-The whole instruction set for the Claude Desktop **local routine** that files the week's
+The whole instruction set for the Claude Desktop **scheduled task** that files the week's
 42 Macro Dr. Mo table into marketdata. Copy it into your scheduler folder with
 `run-drmo.cmd` and `drmo-fetch.cmd`, fill the markers, and point the routine at it with one line:
 
@@ -33,17 +33,27 @@ The Mac must be awake when the routine runs. The routine copies the one PDF it n
 local temp folder and reads the copy, so nothing is held open on the share. The decks are
 subscriber material: the copy stays in the temp folder and nothing from it is committed.
 
-## Routine settings
+## Task settings
+
+Create it **by hand**, in the Code tab: Scheduled (older builds: Routines), New task, Set
+up manually. Asking Claude in a chat to create the task produced a **cloud** task on
+2026-11-22: it gets file access to the folder and no shell, so neither `.cmd` can run and
+every run fails. Local or cloud is fixed when the task is created.
 
 | field | value |
 |---|---|
-| Type | Local |
-| Folder | `REPLACE_WITH_CODE_ROOT` |
+| Runs on | Advanced settings, General: **Require this computer** ON. If the switch is missing, the **Repository** field is set: set it to None, which makes the switch appear |
+| Local folder | `REPLACE_WITH_CODE_ROOT` |
+| Repository, Project | None |
 | Schedule | **Sunday**, two routines: about 18:00 ET and about 19:45 ET (the second is the retry). The slide is dated Saturday but the deck normally appears Sunday afternoon, around the 17:00 ET Sunday call (its recording follows at about 18:30). Both runs sit after the 17:00 vintage task and before the 20:55 futures window, whose repeats sync the same replicas this wrapper syncs. On a week already filed the second run writes nothing and exits 0. |
 | Instructions | the one line above |
-| Permission mode | the default, plus the allow rules below |
+| Permission mode | whatever the dialog offers. On 2026-11-22 a task that runs on this computer said it would work "without pausing for approval", so the rules below did not confine it; the build's refusals and step 7 did |
 
-Allow rules, in `REPLACE_WITH_CODE_ROOT\.claude\settings.json`, in the style of
+The task's page has **Run now**, which is the way to test it. A good run ends with
+`drmo: added week YYYY-MM-DD` (or "already current") and the two sync lines.
+
+Allow rules (they apply to a session run by hand, and to a task in a build that honours
+them), in `REPLACE_WITH_CODE_ROOT\.claude\settings.json`, in the style of
 `series-routine.md` (paths in POSIX form; `Edit`, not `Write`):
 
 ```json
@@ -62,7 +72,10 @@ Allow rules, in `REPLACE_WITH_CODE_ROOT\.claude\settings.json`, in the style of
 ```
 
 `drmo-fetch.cmd` is a template beside this file, like `run-drmo.cmd`: copy it into the
-scheduler folder and fill its two markers. It copies the newest deck to a local temp folder
+scheduler folder and fill its two markers. `REPLACE_WITH_DECKS_SHARE` must be the SMB share
+(`\\MACHINE\share`), never a `\\tsclient\...` path: that one is the Mac's disk seen
+through a Remote Desktop connection, so it works when you test by hand over Remote Desktop
+and does not exist for a scheduled run. It copies the newest deck to a local temp folder
 and prints where the slide is.
 
 Its output is two lines: which deck was taken, and `drmo: slide on page N, report date
