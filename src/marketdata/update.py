@@ -132,6 +132,25 @@ def main(argv=None) -> int:
                         "_calendar/YYYY-MM-DD.json. A snapshot, rewritten whole each "
                         "build (forecasts and actuals change). No network. A missing or "
                         "malformed capture is refused by name and writes nothing.")
+    p.add_argument("--build-drmo", nargs="?", const=True, default=None, metavar="PATH",
+                   help="no network: add every filed 42 Macro Dr. Mo week the table "
+                        "lacks to metadata/drmo.parquet, from the weekly transcriptions "
+                        "under $MARKETDATA_FORTYTWO_RAW (else _raw/fortytwo under the "
+                        "store) at drmo/YYYY-MM-DD.csv. With PATH, first file that CSV "
+                        "(saved anywhere, under any name) under its own report_date. "
+                        "Append-only: a stored week is never rewritten, and a file that "
+                        "disagrees with its stored week is refused by name. Never "
+                        "commit a transcription: it is 42 Macro subscriber data.")
+    p.add_argument("--replace-drmo-week", nargs="+", metavar="YYYY-MM-DD", default=None,
+                   type=lambda v: dt.date.fromisoformat(v),
+                   help="with --build-drmo: let the filed transcription of these weeks "
+                        "OVERWRITE the stored week, for a corrected re-read. Names "
+                        "weeks explicitly, never all of them.")
+    p.add_argument("--accept-drmo-universe", action="store_true",
+                   help="with --build-drmo: accept an asset list that differs from the "
+                        "previous stored week's. Without it that is refused, because a "
+                        "row dropped in transcription looks the same as the publisher "
+                        "changing the list.")
     p.add_argument("--tradingview-csv", metavar="PATH",
                    help="series domain backfill: convert one TradingView chart export "
                         "(Export chart data, CSV) for the ONE symbol named by --symbols "
@@ -226,7 +245,7 @@ def main(argv=None) -> int:
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
-            or args.build_econ_calendar
+            or args.build_econ_calendar or args.build_drmo
             or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
             or args.add_aaii_week
             or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim
@@ -234,6 +253,7 @@ def main(argv=None) -> int:
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
                 "--reconcile-databento, --build-tradingview, --build-econ-calendar, "
+                "--build-drmo, "
                 "--tradingview-csv, "
                 "--build-aaii, --build-aaii-provisional, --add-aaii-week, "
                 "--build-aaii-allocation, "
@@ -242,6 +262,9 @@ def main(argv=None) -> int:
         p.error("--aaii-week dates an --add-aaii-week row; pass both or neither.")
     if args.naaim_week and args.add_naaim_week is None:
         p.error("--naaim-week dates an --add-naaim-week row; pass both or neither.")
+    if (args.replace_drmo_week or args.accept_drmo_universe) and not args.build_drmo:
+        p.error("--replace-drmo-week and --accept-drmo-universe resolve a Dr. Mo build "
+                "refusal. Pass them with --build-drmo.")
     if args.tradingview_csv and (not args.symbols or len(args.symbols) != 1):
         p.error("--tradingview-csv converts one export for one symbol: pass exactly one "
                 "--symbols entry, the internal name the export belongs to.")
@@ -464,6 +487,13 @@ def main(argv=None) -> int:
     if args.build_econ_calendar:
         from .providers import tradingview_calendar as cprov
         results.append(cprov.build())
+
+    if args.build_drmo:
+        from .providers import fortytwo_drmo as dmprov
+        results.append(dmprov.build(
+            None if args.build_drmo is True else args.build_drmo,
+            replace=args.replace_drmo_week or (),
+            accept_universe=args.accept_drmo_universe))
 
     if args.build_aaii:
         from .providers import aaii as aprov
