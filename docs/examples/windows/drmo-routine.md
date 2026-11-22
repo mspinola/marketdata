@@ -1,4 +1,4 @@
-# The Dr. Mo routine: what Claude does on the producer box each Saturday
+# The Dr. Mo routine: what Claude does on the producer box each Sunday
 
 The whole instruction set for the Claude Desktop **local routine** that files the week's
 42 Macro Dr. Mo table into marketdata. Copy it into your scheduler folder beside
@@ -8,8 +8,9 @@ The whole instruction set for the Claude Desktop **local routine** that files th
 
 Markers: `REPLACE_WITH_CODE_ROOT` (e.g. `C:\Users\you\code`),
 `REPLACE_WITH_MARKETDATA_STORE_PATH`, `REPLACE_WITH_SCHEDULER_DIR`, and
-`REPLACE_WITH_HOW_THE_SLIDE_IS_OBTAINED` (one sentence: where this week's slide is, for
-example a folder the PDF is saved to, or the connector and search the session should use).
+`REPLACE_WITH_WHERE_THE_DECKS_ARE` (one sentence: how this session reaches the 42 Macro
+slide decks, for example the folder the PDFs are saved to, or the connector and search to
+use).
 
 Design and the file format's reasons: marketdata `docs/design/drmo.md`. The transcription is
 subscriber data. It stays under `_raw` on this box and is never committed anywhere.
@@ -20,7 +21,7 @@ subscriber data. It stays under `_raw` on this box and is never committed anywhe
 |---|---|
 | Type | Local |
 | Folder | `REPLACE_WITH_CODE_ROOT` |
-| Schedule | Saturday, once the report is normally out (proposed 12:00 ET), and a second routine Sunday 12:00 ET as the retry. Both clear of the 08:10 COT catch-up, the 17:00 vintage task and the 20:55 futures window, whose runs sync the same replicas this wrapper syncs. On a week already filed the second run writes nothing and exits 0. |
+| Schedule | **Sunday**, two routines: about 18:00 ET and about 19:45 ET (the second is the retry). The slide is dated Saturday but the deck normally appears Sunday afternoon, around the 17:00 ET Sunday call (its recording follows at about 18:30). Both runs sit after the 17:00 vintage task and before the 20:55 futures window, whose repeats sync the same replicas this wrapper syncs. On a week already filed the second run writes nothing and exits 0. |
 | Instructions | the one line above |
 | Permission mode | the default, plus the allow rules below |
 
@@ -46,10 +47,16 @@ the connector tool), copied from the prompt text of one interactive run.
 
 Do these in order, and nothing else.
 
-1. **Get this week's Dr. Mo slide.** REPLACE_WITH_HOW_THE_SLIDE_IS_OBTAINED. It is the slide
-   whose title names the Discretionary Risk Management Overlay and ends with a date. If the
-   newest one you can find is dated more than six days ago, this week's is not out: say so
-   and stop. Write nothing.
+1. **Get this week's Dr. Mo slide.** REPLACE_WITH_WHERE_THE_DECKS_ARE. It is the slide
+   whose title names the Discretionary Risk Management Overlay and ends with a date.
+   - First look at the raw folder (step 5's path). If it already holds a file dated within
+     the last six days, this week is filed: write nothing and go to step 6.
+   - Take the slide from this weekend's **Around the Horn** deck.
+   - Only if that deck is not available, take it from the **most recent Leadoff Morning
+     Note** deck instead. Its slide carries its own, earlier date: use the date printed on
+     the slide you transcribe, never today's and never the other deck's.
+   - If the newest slide you can find in either deck is dated more than six days ago, this
+     week's is not out: say so and stop. Write nothing.
 2. **Read the report date and the market regime** from the slide's title and the line under
    it. The date becomes `YYYY-MM-DD`.
 3. **Transcribe every asset row of every block** into CSV with exactly this header:

@@ -26,6 +26,12 @@ Its shape was read off one report (2026-11-21); the shape, not the content, is r
   position, short half, short max. The legend says a highlighted cell marks a change since
   the previous report, by direction.
 
+It is printed in the weekend **Around the Horn** deck, which normally appears Sunday
+afternoon around the 17:00 ET Sunday call, although the slide is dated the Saturday. The
+weekday **Leadoff Morning Note** deck carries the same slide under its own date and is the
+fallback when the weekend deck is not available. So `report_date` is the date printed on
+the slide transcribed: usually a Saturday, a weekday when the fallback was used.
+
 There is no API and no file export. It reaches a machine only through a Claude session that
 can see the slide, which until now was a claude.ai Project of the owner's.
 
@@ -127,8 +133,9 @@ live here.
 | situation | `drmo()` returns |
 |---|---|
 | no build has ever run, or the table has not synced | empty frame, the full column list |
-| this week's report not filed yet (Saturday morning draft) | empty frame: last Saturday's report is 7 days old, past `max_age_days=6` |
-| filed late (Sunday) | the report, from the next sync onward |
+| this week's report not filed yet (any Saturday, and Sunday before the routine) | empty frame: last Saturday's report is 7 days old, past `max_age_days=6` |
+| filed Sunday evening, the normal case | the report, from the wrapper's sync onward (minutes after the 18:00 ET routine) |
+| filed from the Leadoff fallback | the report under its weekday date, so it ages out correspondingly earlier |
 | a week skipped entirely | empty for that week; `drmo(asof=...)` for a day in it is empty too |
 | the caller wants the last one regardless | `max_age_days=None`, and `report_date` on every row says how old it is |
 
@@ -142,4 +149,6 @@ and calendar routines) transcribes the slide, writes the CSV into the raw folder
 `run-drmo.cmd`, which builds and then calls the two sync scripts. Exact instructions and the
 proposed schedule: `docs/examples/windows/drmo-routine.md`. Delivery does not depend on that
 wrapper's syncs alone: every later producer run mirrors both stores, the unconditional 08:10
-catch-up included, so a Saturday build is on the Mac by Sunday 08:10 at the latest.
+catch-up included, so a Sunday evening build that somehow missed its own syncs is on the Mac by Monday 08:10 at
+the latest. A consumer that wants the week in a Sunday page must build after the routine:
+later than about 18:15 ET, or 20:00 ET to cover the retry.
