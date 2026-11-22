@@ -123,7 +123,9 @@ def _empty() -> pd.DataFrame:
 def _typed(df: pd.DataFrame) -> pd.DataFrame:
     df = df.reindex(columns=list(COLUMNS))
     df["report_date"] = pd.to_datetime(df["report_date"])
-    df["rsi"] = df["rsi"].astype("int64")
+    # Nullable: slides published before the RSI column existed (2023 to early 2024)
+    # carry no RSI at all, and a missing reading is not a zero.
+    df["rsi"] = pd.to_numeric(df["rsi"]).astype("Int64")
     df["position"] = df["position"].astype("float64")
     for c in ("regime", "group", "asset", "ticker", "vams", "proper_trade", "change"):
         df[c] = df[c].astype("object").where(df[c].notna(), None)
@@ -199,9 +201,9 @@ def parse_capture(path, *, expect_date: Optional[dt.date] = None,
         vams = r["vams"].lower()
         if vams not in VAMS:
             raise RawError(f"{where}: vams is {r['vams']!r}, expected one of {VAMS}")
-        if not re.fullmatch(r"\d{1,3}", r["rsi"]) or int(r["rsi"]) > 100:
+        if r["rsi"] and (not re.fullmatch(r"\d{1,3}", r["rsi"]) or int(r["rsi"]) > 100):
             raise RawError(f"{where}: rsi is {r['rsi']!r}, expected a whole number "
-                           f"from 0 to 100")
+                           f"from 0 to 100, or empty when the slide prints no RSI")
         trade = r["proper_trade"].lower()
         if trade not in POSITION:
             raise RawError(f"{where}: proper_trade is {r['proper_trade']!r}, expected "
@@ -212,7 +214,7 @@ def parse_capture(path, *, expect_date: Optional[dt.date] = None,
                            f"of {CHANGE}")
         rows.append({"report_date": pd.Timestamp(expect_date), "regime": r["regime"].upper(),
                      "group": r["group"], "asset": asset, "ticker": ticker, "vams": vams,
-                     "rsi": int(r["rsi"]), "proper_trade": trade,
+                     "rsi": int(r["rsi"]) if r["rsi"] else None, "proper_trade": trade,
                      "position": POSITION[trade], "change": change})
     if not rows:
         raise RawError(f"{path}: a header and no rows")
@@ -337,7 +339,9 @@ def _check_against_previous(df: pd.DataFrame, prev: pd.DataFrame, src: Path,
             f"(added: {sorted(new - old) or 'none'}; missing: {sorted(old - new) or 'none'}). "
             f"A dropped or renamed row is the likeliest transcription error. Check the "
             f"slide; if the publisher did change the list, pass --accept-drmo-universe.")
-    if new == old:
+    # Only when RSI is printed: about eighty two-digit RSIs do not all repeat, but on a
+    # slide with only VAMS and the trade an unchanged week can be genuine.
+    if new == old and df["rsi"].notna().any():
         a = _keyed(df)[_READINGS].sort_index()
         b = _keyed(prev)[_READINGS].sort_index()
         if a.equals(b):
