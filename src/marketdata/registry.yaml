@@ -162,6 +162,25 @@ Managed Futures ETF:
     inception: "2026-02-19"
     note: "Daily line for the SDMF panel on the fund-monitor pages, from the first bar Yahoo serves. Distributions 2026-06-25 and 2026-09-25."
 
+# Risk parity and a balanced yardstick for the ALLW page (allw.bluemagicai.com, dbmf-tracker):
+# ALLW's own daily line, and the two funds it is compared with, RPAR (risk parity at lower
+# leverage) and AOR (a fixed 60/40). Read on the `total` tier, all three distribute. Inception
+# is the first bar Yahoo serves (measured 2026-11-23). The consumer is in another repo, so a
+# clean grep of this one is not evidence these are unused.
+Balanced Fund ETF:
+  ALLW:
+    yahoo: "ALLW"
+    inception: "2025-03-06"
+    note: "State Street Bridgewater All Weather ETF, launched 2025-03-05. One distribution through 2026-11-20 (2025-12)."
+  RPAR:
+    yahoo: "RPAR"
+    inception: "2019-12-13"
+    note: "RPAR Risk Parity ETF (Evoke Advisors), launched 2019-12-12. About 1.2x gross notional on 2026-11-23."
+  AOR:
+    yahoo: "AOR"
+    inception: "2008-11-19"
+    note: "iShares Core 60/40 Balanced Allocation ETF. A fixed-weight 60/40 yardstick, not a fund the pages monitor."
+
 # KEPT DELIBERATELY. These four have been removed twice, on 2026-07-xx and again on
 # 2026-08-21, both times on the belief that nothing used them. Something does:
 # npf/trading_riot maps each to a realized counterpart (VIX->ES, VXN->NQ, OVX->CL,
