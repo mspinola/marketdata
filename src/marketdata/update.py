@@ -250,13 +250,17 @@ def main(argv=None) -> int:
                         "export (data/ahlt/ahlt_positions.csv on the producer). No network. "
                         "A missing or malformed file, a shorter history or an older last "
                         "date than the table holds is refused by name and writes nothing.")
+    p.add_argument("--build-kmlm", metavar="CSV", default=None,
+                   help="replace metadata/kmlm_positions.parquet with dbmf-tracker's KMLM "
+                        "export (data/kmlm/kmlm_positions.csv on the producer). No network. "
+                        "Refused by name, writing nothing, on the same grounds as --build-ahlt.")
     args = p.parse_args(argv)
 
     if not (args.bars or args.metadata or args.check or args.pin or args.verify_pin
             or args.stamp_flags or args.ingest_databento or args.build_databento
             or args.reconcile_databento or args.build_tradingview
             or args.build_econ_calendar or args.build_drmo or args.find_drmo_slide
-            or args.build_ahlt
+            or args.build_ahlt or args.build_kmlm
             or args.tradingview_csv or args.build_aaii or args.build_aaii_provisional
             or args.add_aaii_week
             or args.build_aaii_allocation or args.fetch_naaim or args.build_naaim
@@ -264,7 +268,7 @@ def main(argv=None) -> int:
         p.error("nothing to do. Pass --bars, --metadata, --check, --pin, "
                 "--verify-pin, --stamp-flags, --ingest-databento, --build-databento, "
                 "--reconcile-databento, --build-tradingview, --build-econ-calendar, "
-                "--build-drmo, --find-drmo-slide, --build-ahlt, "
+                "--build-drmo, --find-drmo-slide, --build-ahlt, --build-kmlm, "
                 "--tradingview-csv, "
                 "--build-aaii, --build-aaii-provisional, --add-aaii-week, "
                 "--build-aaii-allocation, "
@@ -512,6 +516,10 @@ def main(argv=None) -> int:
     if args.build_ahlt:
         from .providers import ahlt_positions as aprov
         results.append(aprov.build(args.build_ahlt))
+
+    if args.build_kmlm:
+        from .providers import kmlm_positions as kprov
+        results.append(kprov.build(args.build_kmlm))
 
     if args.build_drmo:
         from .providers import fortytwo_drmo as dmprov

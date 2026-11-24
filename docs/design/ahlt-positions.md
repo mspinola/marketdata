@@ -59,3 +59,33 @@ same day's export. AHLT posts each day's book the next business morning: the tab
 Saturday ends on Thursday's close.
 
 Reproducer: `python -c "import marketdata as m; d=m.ahlt_positions(); print(d.date.max(), d.date.nunique(), d.market.nunique())"`
+
+## The KMLM table beside it (2026-11-24)
+
+`metadata/kmlm_positions.parquet` (provider `providers/kmlm_positions.py`, build
+`marketdata-update --build-kmlm CSV`, reader `marketdata.kmlm_positions()`) is the same
+thing for KMLM (KraneShares Mount Lucas Managed Futures Index Strategy ETF), the MLM
+trend index in an ETF. Same consumer, same rules, same refusals: the provider shares
+this one's code and only names its table and columns.
+
+It differs in two ways. It has no `kind` column (every position is a future) and it has
+`contracts`, signed. The index holds a fixed contract count between its monthly
+rebalances, so a weight that moves on an unchanged count moved with price alone, and a
+changed count is a trade. History starts 2024-01-02, the oldest dated file the issuer
+serves. KMLM holds the grains, softs, livestock and energy products AHLT does not (ZC,
+ZS, ZW, SB, LC, RB, HO) and no equity index futures.
+
+On the producer, a second line after the AHLT one, with its own exit code for the same
+reason (a checkout that predates the flag fails argparse, and neither may stop the
+equities delivery):
+
+```bat
+"%MDEXE%" --build-kmlm "C:\Users\matt\code\dbmf-tracker-windows-bundle\data\kmlm\kmlm_positions.csv"
+set "KMLM_RC=%ERRORLEVEL%"
+if not "%KMLM_RC%"=="0" echo kmlm: positions build failed with code %KMLM_RC% -- equities delivery continues
+```
+
+dbmf-tracker refreshes that CSV on its 08:30 and 18:00 runs, so the 17:30 build files the
+morning's export.
+
+Reproducer: `python -c "import marketdata as m; d=m.kmlm_positions(); print(d.date.max(), d.date.nunique(), d.market.nunique())"`

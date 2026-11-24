@@ -44,34 +44,39 @@ class RawError(ValueError):
     """An export the build refuses. The message names the file."""
 
 
-def table_path() -> Path:
-    return config.metadata_dir() / f"{TABLE}.parquet"
+def table_path(table: str = TABLE) -> Path:
+    return config.metadata_dir() / f"{table}.parquet"
 
 
-def _empty() -> pd.DataFrame:
-    return pd.DataFrame(columns=list(COLUMNS))
+def _empty(columns=COLUMNS) -> pd.DataFrame:
+    return pd.DataFrame(columns=list(columns))
 
 
-def parse_export(path) -> pd.DataFrame:
-    """dbmf-tracker's ``ahlt_positions.csv`` as the stored table. Raises RawError."""
+def parse_export(path, required=REQUIRED, numeric=("exposure", "weight"),
+                 strings=("market", "asset_class", "kind"), fund: str = "AHLT") -> pd.DataFrame:
+    """dbmf-tracker's ``ahlt_positions.csv`` as the stored table. Raises RawError.
+
+    The keyword arguments are for a sibling export in the same shape (KMLM's, see
+    providers/kmlm_positions.py): which columns are kept, which are numbers, which are
+    strings, and the fund's name for the messages."""
     p = Path(path)
     if not p.is_file():
-        raise RawError(f"no AHLT export at {p}")
+        raise RawError(f"no {fund} export at {p}")
     try:
         df = pd.read_csv(p)
     except Exception as e:  # noqa: BLE001 (any unreadable file is one refusal)
         raise RawError(f"{p.name}: not readable as CSV ({e})") from e
-    missing = [c for c in REQUIRED if c not in df.columns]
+    missing = [c for c in required if c not in df.columns]
     if missing:
         raise RawError(f"{p.name}: missing columns {missing}")
     if df.empty:
         raise RawError(f"{p.name}: no rows")
-    df = df[list(COLUMNS)].copy()
+    df = df[list(required)].copy()
     try:
         df["date"] = pd.to_datetime(df["date"], format="%Y-%m-%d")
     except Exception as e:  # noqa: BLE001
         raise RawError(f"{p.name}: a date is not YYYY-MM-DD ({e})") from e
-    for c in ("exposure", "weight"):
+    for c in numeric:
         df[c] = pd.to_numeric(df[c], errors="coerce")
     bad = df[df["weight"].isna() | df["market"].isna()]
     if len(bad):
@@ -81,23 +86,24 @@ def parse_export(path) -> pd.DataFrame:
     if dup.any():
         d = df[dup].iloc[0]
         raise RawError(f"{p.name}: more than one row for {d['market']} on {d['date']:%Y-%m-%d}")
-    for c in ("market", "asset_class", "kind"):
+    for c in strings:
         df[c] = df[c].astype("string")
     return df.sort_values(["date", "market"]).reset_index(drop=True)
 
 
-def build(path) -> dict:
+def build(path, table: str = TABLE, parse=None, label: str = "ahlt positions") -> dict:
     """Replace the table with the export at ``path``. Returns the CLI's result dict. A
-    refused export leaves the table on disk as it was."""
+    refused export leaves the table on disk as it was. ``table``, ``parse`` and ``label``
+    let a sibling export in the same shape reuse the two refusals and the write."""
     def refused(msg: str) -> dict:
-        print(f"ahlt positions: REFUSED -- {msg}")
-        return {"kind": TABLE, "ok": False, "wrote": 0, "failed": 1, "errors": [(TABLE, msg)]}
+        print(f"{label}: REFUSED -- {msg}")
+        return {"kind": table, "ok": False, "wrote": 0, "failed": 1, "errors": [(table, msg)]}
 
     try:
-        df = parse_export(path)
+        df = (parse or parse_export)(path)
     except RawError as e:
         return refused(str(e))
-    old = read()
+    old = read(table, df.columns)
     if len(old):
         n_new, n_old = df["date"].nunique(), old["date"].nunique()
         if n_new < n_old:
@@ -106,15 +112,15 @@ def build(path) -> dict:
         if df["date"].max() < old["date"].max():
             return refused(f"{Path(path).name} ends {df['date'].max():%Y-%m-%d}, the table "
                            f"ends {old['date'].max():%Y-%m-%d}: an older export is not written")
-    store._atomic_write_parquet(df, table_path())
-    store._touch_manifest("metadata", TABLE, df.set_index("date"), NAME)
-    print(f"ahlt positions: {len(df)} rows, {df['date'].nunique()} dates, "
+    store._atomic_write_parquet(df, table_path(table))
+    store._touch_manifest("metadata", table, df.set_index("date"), NAME)
+    print(f"{label}: {len(df)} rows, {df['date'].nunique()} dates, "
           f"{df['date'].min():%Y-%m-%d} to {df['date'].max():%Y-%m-%d}, "
-          f"{df['market'].nunique()} markets -> {table_path()}")
-    return {"kind": TABLE, "ok": True, "wrote": len(df), "failed": 0, "errors": []}
+          f"{df['market'].nunique()} markets -> {table_path(table)}")
+    return {"kind": table, "ok": True, "wrote": len(df), "failed": 0, "errors": []}
 
 
-def read() -> pd.DataFrame:
+def read(table: str = TABLE, columns=COLUMNS) -> pd.DataFrame:
     """The stored table, or an EMPTY frame when no build has run."""
-    p = table_path()
-    return pd.read_parquet(p) if p.exists() else _empty()
+    p = table_path(table)
+    return pd.read_parquet(p) if p.exists() else _empty(columns)
