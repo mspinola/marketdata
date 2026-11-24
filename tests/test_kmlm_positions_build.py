@@ -57,4 +57,4 @@ def test_the_real_export_shape_parses(tmp_store, tmp_path):
     """Header and a row copied from dbmf-tracker's data/kmlm/kmlm_positions.csv (2026-11-24)."""
     body = "2024-01-02,CL,commodity,CLH4,-247.0,-17443140.0,-0.06702462181959425,WTI CRUDE FUTURE MAR24\n"
     df = kp.parse_export(export(tmp_path, body))
-    assert df.weight.iloc[0] == -0.06702462181959425 and df.market.iloc[0] == "CL" and "ticker" not in df.columns
+    assert abs(df.weight.iloc[0] + 0.06702462181959425) < 1e-12 and df.market.iloc[0] == "CL" and "ticker" not in df.columns
