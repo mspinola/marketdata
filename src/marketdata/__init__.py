@@ -80,6 +80,16 @@ def ahlt_positions():
     return read()
 
 
+def kmlm_positions():
+    """KMLM's (KraneShares Mount Lucas, the MLM trend index in an ETF) daily book since
+    2024-01-02: one row per date and market with ``weight`` (notional / NAV, signed,
+    negative is short), ``contracts`` (signed), ``exposure`` in dollars and
+    ``asset_class``. Market codes are dbmf-tracker's, not registry symbols. Rewritten
+    whole each build; EMPTY when no build has run. See providers/kmlm_positions.py."""
+    from .providers.kmlm_positions import read
+    return read()
+
+
 def drmo(asof=None, *, max_age_days=6):
     """42 Macro's weekly Dr. Mo table as published in the report current on ``asof``
     (default today): one row per asset with ``vams`` (bullish / neutral / bearish),
@@ -107,7 +117,7 @@ __all__ = [
     "tiers_for", "stored_tiers_for", "ADJUSTMENT_VERSION",
     "symbol", "all_symbols", "by_asset_class", "domain_for", "DOMAINS",
     "REGISTRY", "Symbol",
-    "load_manifest", "read_metadata", "econ_calendar", "ahlt_positions", "drmo", "drmo_history",
+    "load_manifest", "read_metadata", "econ_calendar", "ahlt_positions", "kmlm_positions", "drmo", "drmo_history",
     "schema_version", "require_schema",
     "read_contract_regimes", "point_value_asof", "tick_value_asof",
     "declared_symbols", "REGIME_COLUMNS", "RegimeError",
